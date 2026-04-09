@@ -1,0 +1,20 @@
+{
+  "name": "@browser-acp/native-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "install:chrome-host": "tsx src/installManifest.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@browser-acp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "vitest": "^3.1.2"
+  }
+}

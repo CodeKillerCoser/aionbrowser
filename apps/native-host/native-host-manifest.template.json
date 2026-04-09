@@ -1,0 +1,9 @@
+{
+  "name": "com.browser_acp.host",
+  "description": "Native messaging host for the Browser ACP side panel",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}
