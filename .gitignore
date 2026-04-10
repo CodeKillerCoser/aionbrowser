@@ -3,6 +3,7 @@ dist
 .DS_Store
 coverage
 .wxt
+.worktrees
 *.log
 apps/browser-extension/.output
 apps/browser-extension/.wxt
