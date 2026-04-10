@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
+import {
+  BROWSER_ACP_EXTENSION_DISPLAY_NAME,
+  NATIVE_HOST_NAME,
+} from "../src/config/nativeHostConfig.js";
 import { collectExtensionIdsFromPreferences, createNativeHostManifest } from "../src/installManifest.js";
+import {
+  resolveBrowserAcpRootDir,
+  resolveChromeNativeMessagingHostsDir,
+  resolveChromeRootDir,
+} from "../src/platform/chromePaths.js";
+
+describe("nativeHostConfig", () => {
+  it("re-exports the canonical extension and host names", () => {
+    expect(BROWSER_ACP_EXTENSION_DISPLAY_NAME).toBe("Browser ACP");
+    expect(NATIVE_HOST_NAME).toBe("com.browser_acp.host");
+  });
+});
+
+describe("chromePaths", () => {
+  it("derives browser ACP and Chrome directories from a home directory", () => {
+    expect(resolveBrowserAcpRootDir("/Users/example")).toBe(
+      "/Users/example/Library/Application Support/browser-acp",
+    );
+    expect(resolveChromeRootDir("/Users/example")).toBe(
+      "/Users/example/Library/Application Support/Google/Chrome",
+    );
+    expect(resolveChromeNativeMessagingHostsDir("/Users/example")).toBe(
+      "/Users/example/Library/Application Support/Google/Chrome/NativeMessagingHosts",
+    );
+  });
+});
 
 describe("collectExtensionIdsFromPreferences", () => {
   it("finds Browser ACP extension ids from Chrome preference payloads", () => {
@@ -9,7 +39,7 @@ describe("collectExtensionIdsFromPreferences", () => {
           settings: {
             abcdefghijklmnopabcdefghijklmnop: {
               manifest: {
-                name: "Browser ACP",
+                name: BROWSER_ACP_EXTENSION_DISPLAY_NAME,
               },
             },
             zyxwvutsrqponmlkjihgfedcbazyxwvu: {
@@ -34,7 +64,7 @@ describe("createNativeHostManifest", () => {
     });
 
     expect(manifest).toMatchObject({
-      name: "com.browser_acp.host",
+      name: NATIVE_HOST_NAME,
       path: "/tmp/browser-acp-host.sh",
       allowed_origins: ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
     });

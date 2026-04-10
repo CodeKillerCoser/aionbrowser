@@ -1,20 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, openSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:net";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
-  BROWSER_ACP_APP_SUPPORT_DIR_NAME,
   DAEMON_LOG_FILE_NAME,
   DAEMON_STATE_FILE_NAME,
   createDaemonBaseUrl,
 } from "@browser-acp/config";
 import type { NativeHostBootstrapResponse } from "@browser-acp/shared-types";
 import { createFileDebugLogger } from "./debugLog.js";
+import { resolveBrowserAcpRootDir } from "./platform/chromePaths.js";
 
 interface DaemonState {
   port: number;
@@ -152,7 +151,7 @@ export async function getDaemonStatus(rootDir: string): Promise<NativeHostBootst
 }
 
 export function getDefaultRootDir(): string {
-  return join(homedir(), "Library", "Application Support", BROWSER_ACP_APP_SUPPORT_DIR_NAME);
+  return resolveBrowserAcpRootDir();
 }
 
 async function readState(statePath: string): Promise<DaemonState | undefined> {

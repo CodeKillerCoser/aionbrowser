@@ -1,13 +1,17 @@
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BROWSER_ACP_APP_SUPPORT_DIR_NAME,
-  BROWSER_ACP_EXTENSION_NAME,
-  BROWSER_ACP_NATIVE_HOST_NAME,
-} from "@browser-acp/config";
+  BROWSER_ACP_EXTENSION_DISPLAY_NAME,
+  NATIVE_HOST_DESCRIPTION,
+  NATIVE_HOST_NAME,
+} from "./config/nativeHostConfig.js";
+import {
+  resolveBrowserAcpRootDir,
+  resolveChromeNativeMessagingHostsDir,
+  resolveChromeRootDir,
+} from "./platform/chromePaths.js";
 
 export interface NativeHostManifest {
   name: string;
@@ -29,9 +33,6 @@ interface InstallManifestOptions {
   nodePath?: string;
 }
 
-const HOST_NAME = BROWSER_ACP_NATIVE_HOST_NAME;
-const EXTENSION_NAME = BROWSER_ACP_EXTENSION_NAME;
-
 export function collectExtensionIdsFromPreferences(preferencePayloads: unknown[]): string[] {
   const extensionIds = new Set<string>();
 
@@ -42,7 +43,7 @@ export function collectExtensionIdsFromPreferences(preferencePayloads: unknown[]
     }
 
     for (const [extensionId, value] of Object.entries(settings)) {
-      if (value?.manifest?.name === EXTENSION_NAME) {
+      if (value?.manifest?.name === BROWSER_ACP_EXTENSION_DISPLAY_NAME) {
         extensionIds.add(extensionId);
       }
     }
@@ -56,8 +57,8 @@ export function createNativeHostManifest({
   extensionIds,
 }: CreateManifestOptions): NativeHostManifest {
   return {
-    name: HOST_NAME,
-    description: "Native messaging host for the Browser ACP side panel",
+    name: NATIVE_HOST_NAME,
+    description: NATIVE_HOST_DESCRIPTION,
     path: hostPath,
     type: "stdio",
     allowed_origins: extensionIds.map((extensionId) => `chrome-extension://${extensionId}/`),
@@ -65,7 +66,7 @@ export function createNativeHostManifest({
 }
 
 export async function discoverChromeExtensionIds(
-  chromeRoot = join(homedir(), "Library", "Application Support", "Google", "Chrome"),
+  chromeRoot = resolveChromeRootDir(),
 ): Promise<string[]> {
   const preferencePaths = [
     join(chromeRoot, "Default", "Secure Preferences"),
@@ -140,10 +141,10 @@ export async function installChromeNativeHost(
     );
   }
 
-  const hostRootDir = options.hostRootDir ?? join(homedir(), "Library", "Application Support", BROWSER_ACP_APP_SUPPORT_DIR_NAME);
-  const manifestDir = join(homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
-  const launcherPath = join(hostRootDir, "bin", HOST_NAME);
-  const manifestPath = join(manifestDir, `${HOST_NAME}.json`);
+  const hostRootDir = options.hostRootDir ?? resolveBrowserAcpRootDir();
+  const manifestDir = resolveChromeNativeMessagingHostsDir();
+  const launcherPath = join(hostRootDir, "bin", NATIVE_HOST_NAME);
+  const manifestPath = join(manifestDir, `${NATIVE_HOST_NAME}.json`);
   const nodePath = options.nodePath ?? process.execPath;
 
   await mkdir(dirname(launcherPath), { recursive: true });
