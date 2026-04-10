@@ -12,7 +12,7 @@ import type {
   BackgroundRuntimeMessage,
   PendingSelectionAction,
 } from "../messages";
-import type { BrowserAcpBridge, BrowserAcpSocket } from "./App";
+import type { BrowserAcpBridge, BrowserAcpSocket } from "./contracts";
 
 export function createChromeBridge(): BrowserAcpBridge {
   return {
@@ -20,7 +20,7 @@ export function createChromeBridge(): BrowserAcpBridge {
     listAgents: async () => sendMessage({ type: "browser-acp/list-agents" }),
     listSessions: async () => sendMessage({ type: "browser-acp/list-sessions" }),
     getActiveContext: async () => sendMessage({ type: "browser-acp/get-active-context" }),
-    subscribeToActiveContext(onContext) {
+    subscribeToActiveContext(onContext: (context: BrowserContextBundle) => void) {
       const listener = (message: BackgroundRuntimeMessage) => {
         if (message.type === "browser-acp/context-changed") {
           onContext(message.context);
@@ -36,7 +36,7 @@ export function createChromeBridge(): BrowserAcpBridge {
       sendMessage<PendingSelectionAction | null>({
         type: "browser-acp/claim-pending-selection-action",
       }),
-    subscribeToSelectionActions(onReady) {
+    subscribeToSelectionActions(onReady: () => void) {
       const listener = (message: BackgroundRuntimeMessage) => {
         if (message.type === "browser-acp/selection-action-ready") {
           onReady();
@@ -49,7 +49,7 @@ export function createChromeBridge(): BrowserAcpBridge {
       };
     },
     getDebugState: async () => sendMessage<BackgroundDebugState>({ type: "browser-acp/get-debug-state" }),
-    createSession: async (_bootstrap, agentId, context) =>
+    createSession: async (_bootstrap: NativeHostBootstrapResponse, agentId: string, context: BrowserContextBundle) =>
       sendMessage({
         type: "browser-acp/create-session",
         agentId,

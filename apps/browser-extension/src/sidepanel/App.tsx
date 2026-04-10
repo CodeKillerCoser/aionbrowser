@@ -3,44 +3,16 @@ import type {
   BrowserContextBundle,
   ConversationSummary,
   DebugLogEntry,
-  NativeHostBootstrapResponse,
   PromptEnvelope,
-  ResolvedAgent,
   SessionEvent,
   SessionSocketServerMessage,
 } from "@browser-acp/shared-types";
 import type { BackgroundDebugState, PendingSelectionAction } from "../messages";
 import { createChromeBridge } from "./bridge";
+import type { BrowserAcpBridge, BrowserAcpSocket } from "./contracts";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { buildThreadMessages } from "./threadMessages";
-
-export interface BrowserAcpSocket {
-  sendPrompt(prompt: PromptEnvelope): void;
-  close(): void;
-}
-
-export interface BrowserAcpBridge {
-  ensureDaemon(): Promise<NativeHostBootstrapResponse>;
-  listAgents(bootstrap: NativeHostBootstrapResponse): Promise<ResolvedAgent[]>;
-  listSessions(bootstrap: NativeHostBootstrapResponse): Promise<ConversationSummary[]>;
-  getActiveContext(): Promise<BrowserContextBundle>;
-  subscribeToActiveContext(onContext: (context: BrowserContextBundle) => void): () => void;
-  claimPendingSelectionAction(): Promise<PendingSelectionAction | null>;
-  subscribeToSelectionActions(onReady: () => void): () => void;
-  getDebugState(): Promise<BackgroundDebugState>;
-  createSession(
-    bootstrap: NativeHostBootstrapResponse,
-    agentId: string,
-    context: BrowserContextBundle,
-  ): Promise<ConversationSummary>;
-  connectSession(
-    bootstrap: NativeHostBootstrapResponse,
-    sessionId: string,
-    onMessage: (message: SessionSocketServerMessage) => void,
-    onError: (error: string) => void,
-    onStatus?: (status: "open" | "close" | "error", details?: Record<string, unknown>) => void,
-  ): BrowserAcpSocket;
-}
+import { usePanelBootstrap } from "../ui/sidepanel/hooks/usePanelBootstrap";
 
 export function App() {
   return (
@@ -62,15 +34,7 @@ function keepNewerContext(
 }
 
 export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
-  const [bootstrap, setBootstrap] = useState<NativeHostBootstrapResponse | null>(null);
-  const [agents, setAgents] = useState<ResolvedAgent[]>([]);
-  const [sessions, setSessions] = useState<ConversationSummary[]>([]);
-  const [context, setContext] = useState<BrowserContextBundle | null>(null);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
-  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [debugState, setDebugState] = useState<BackgroundDebugState | null>(null);
   const [panelLogs, setPanelLogs] = useState<DebugLogEntry[]>([]);
   const [eventsBySession, setEventsBySession] = useState<Record<string, SessionEvent[]>>({});
   const [draft, setDraft] = useState("");
@@ -90,64 +54,22 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
 
     setPanelLogs((current) => [...current, entry].slice(-80));
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    recordPanelLog("panel bootstrap started");
-
-    void (async () => {
-      try {
-        const nextBootstrap = await bridge.ensureDaemon();
-        const [nextAgents, nextSessions, nextContext, nextDebugState] = await Promise.all([
-          bridge.listAgents(nextBootstrap),
-          bridge.listSessions(nextBootstrap),
-          bridge.getActiveContext(),
-          bridge.getDebugState(),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setBootstrap(nextBootstrap);
-        setAgents(nextAgents);
-        setSessions(nextSessions);
-        setContext((current) => keepNewerContext(current, nextContext));
-        setDebugState(nextDebugState);
-        setSelectedSessionId((current) => current || nextSessions[0]?.id || "");
-        setSelectedAgentId((current) =>
-          current ||
-          nextSessions[0]?.agentId ||
-          nextAgents.find((agent) => agent.status === "ready")?.id ||
-          nextAgents[0]?.id ||
-          "",
-        );
-        recordPanelLog("panel bootstrap completed", {
-          agentCount: nextAgents.length,
-          sessionCount: nextSessions.length,
-        });
-      } catch (loadError) {
-        const message = loadError instanceof Error ? loadError.message : String(loadError);
-        setError(message);
-        recordPanelLog("panel bootstrap failed", {
-          error: message,
-        });
-        try {
-          const nextDebugState = await bridge.getDebugState();
-          if (!cancelled) {
-            setDebugState(nextDebugState);
-          }
-        } catch {
-          // Ignore diagnostics refresh failures.
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      socketRef.current?.close();
-    };
-  }, [bridge]);
+  const {
+    bootstrap,
+    agents,
+    sessions,
+    context,
+    selectedAgentId,
+    selectedSessionId,
+    error,
+    debugState,
+    setContext,
+    setSessions,
+    setSelectedAgentId,
+    setSelectedSessionId,
+    setError,
+    setDebugState,
+  } = usePanelBootstrap(bridge, recordPanelLog);
 
   useEffect(() => {
     const unsubscribe = bridge.subscribeToActiveContext((nextContext) => {

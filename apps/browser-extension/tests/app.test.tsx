@@ -8,7 +8,7 @@ import type {
   ResolvedAgent,
   SessionSocketServerMessage,
 } from "@browser-acp/shared-types";
-import { BrowserAcpPanel, type BrowserAcpBridge, type BrowserAcpSocket } from "../src/sidepanel/App";
+import { BrowserAcpPanel, type BrowserAcpBridge, type BrowserAcpSocket } from "../src/ui/sidepanel/BrowserAcpPanel";
 import type { BackgroundDebugState } from "../src/messages";
 
 const context: BrowserContextBundle = {

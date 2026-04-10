@@ -2,7 +2,6 @@ import {
   BROWSER_ACP_NATIVE_HOST_NAME,
   DAEMON_BASE_ORIGIN,
   EXTENSION_STORAGE_KEYS,
-  SELECTION_ACTION_PROMPTS,
   createDaemonBaseUrl,
 } from "@browser-acp/config";
 import type { BrowserContextBundle, BrowserTabPreview, NativeHostBootstrapResponse, ResolvedAgent, ConversationSummary, DebugLogEntry } from "@browser-acp/shared-types";
@@ -15,9 +14,11 @@ import type {
   PageContextPayload,
   SelectionActionType,
 } from "./messages";
+import { createBackgroundRouter } from "./background/router";
 import { resolveSelectionText } from "./contextState";
 import { mergeFramePageContexts } from "./frameContext";
 import { capturePageContextInPage } from "./pageCapture";
+import { createPendingSelectionActionService } from "./session/pendingSelectionActionService";
 
 const DEBUG_LOG_LIMIT = 120;
 
@@ -26,6 +27,57 @@ const debugLogs: BackgroundDebugLogEntry[] = [];
 let bootstrapCache: NativeHostBootstrapResponse | null = null;
 let debugLogsHydrated = false;
 let pendingSelectionAction: PendingSelectionAction | null = null;
+const pendingSelectionActionService = createPendingSelectionActionService({
+  getCurrentAction: () => pendingSelectionAction,
+  setCurrentAction: (action) => {
+    pendingSelectionAction = action;
+  },
+  openSidePanel: openNativeSidePanel,
+  persist: persistPendingSelectionAction,
+  load: loadPendingSelectionAction,
+  clear: clearPendingSelectionAction,
+  notifyReady: () =>
+    notifyRuntime({
+      type: "browser-acp/selection-action-ready",
+    }),
+  logQueuedAction: (action, selectionText, target) =>
+    recordDebugLog("selection-action", "selection action queued", {
+      action,
+      selectionLength: selectionText.length,
+      tabId: target.tabId,
+      windowId: target.windowId,
+    }),
+});
+const backgroundRouter = createBackgroundRouter({
+  updateContextFromPage,
+  ensureDaemon,
+  listAgents: async () => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ResolvedAgent[]>(bootstrap, "/agents");
+  },
+  listSessions: async () => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ConversationSummary[]>(bootstrap, "/sessions");
+  },
+  getActiveContext: () => getActiveContext({ refresh: true }),
+  getDebugState,
+  createSession: async (agentId, context) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ConversationSummary>(bootstrap, "/sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId,
+        context,
+      }),
+    });
+  },
+  queueSelectionAction: (action, selectionText, target) =>
+    pendingSelectionActionService.queue(action, selectionText, target),
+  claimPendingSelectionAction: () => pendingSelectionActionService.claim(),
+});
 void hydrateDebugLogs();
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
@@ -82,90 +134,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundRequest, sender, sendRe
 });
 
 async function handleMessage(message: BackgroundRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
-  if (message.type === "browser-acp/context-update") {
-    return updateContextFromPage(message.payload, sender);
-  }
-
-  if (message.type === "browser-acp/ensure-daemon") {
-    return ensureDaemon();
-  }
-
-  if (message.type === "browser-acp/list-agents") {
-    const bootstrap = await ensureDaemon();
-    return fetchDaemonJson<ResolvedAgent[]>(bootstrap, "/agents");
-  }
-
-  if (message.type === "browser-acp/list-sessions") {
-    const bootstrap = await ensureDaemon();
-    return fetchDaemonJson<ConversationSummary[]>(bootstrap, "/sessions");
-  }
-
-  if (message.type === "browser-acp/get-active-context") {
-    return getActiveContext({ refresh: true });
-  }
-
-  if (message.type === "browser-acp/get-debug-state") {
-    return getDebugState();
-  }
-
-  if (message.type === "browser-acp/create-session") {
-    const bootstrap = await ensureDaemon();
-    return fetchDaemonJson<ConversationSummary>(bootstrap, "/sessions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        agentId: message.agentId,
-        context: message.context,
-      }),
-    });
-  }
-
-  if (message.type === "browser-acp/trigger-selection-action") {
-    return triggerSelectionAction(message, sender);
-  }
-
-  if (message.type === "browser-acp/claim-pending-selection-action") {
-    return claimPendingSelectionAction();
-  }
-
-  return { ok: false, error: "Unsupported message" };
-}
-
-async function triggerSelectionAction(
-  message: Extract<BackgroundRequest, { type: "browser-acp/trigger-selection-action" }>,
-  sender: chrome.runtime.MessageSender,
-): Promise<{ ok: true }> {
-  pendingSelectionAction = {
-    id: crypto.randomUUID(),
-    action: message.action,
-    selectionText: message.selectionText,
-    promptText: buildSelectionActionPrompt(message.action, message.selectionText),
-    createdAt: new Date().toISOString(),
-  };
-
-  await openNativeSidePanel(sender.tab?.windowId);
-  await persistPendingSelectionAction(pendingSelectionAction);
-  await notifyRuntime({
-    type: "browser-acp/selection-action-ready",
-  });
-
-  await recordDebugLog("selection-action", "selection action queued", {
-    action: message.action,
-    selectionLength: message.selectionText.length,
-    tabId: sender.tab?.id,
-    windowId: sender.tab?.windowId,
-  });
-
-  return { ok: true };
-}
-
-async function claimPendingSelectionAction(): Promise<PendingSelectionAction | null> {
-  const nextAction = pendingSelectionAction ?? await loadPendingSelectionAction();
-  pendingSelectionAction = null;
-  await clearPendingSelectionAction();
-  return nextAction;
+  return backgroundRouter.handle(message, sender);
 }
 
 async function updateContextFromPage(
@@ -375,10 +344,6 @@ function isPageContextPayload(value: unknown): value is PageContextPayload {
     "summaryMarkdown" in value &&
     "hasFocus" in value
   );
-}
-
-function buildSelectionActionPrompt(action: SelectionActionType, selectionText: string): string {
-  return SELECTION_ACTION_PROMPTS[action](selectionText);
 }
 
 async function ensureDaemon(): Promise<NativeHostBootstrapResponse> {
