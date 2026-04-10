@@ -5,6 +5,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "paths": {
+      "@browser-acp/config": [
+        "packages/config/src/index.ts"
+      ],
       "@browser-acp/shared-types": [
         "packages/shared-types/src/index.ts"
       ]

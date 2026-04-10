@@ -7,6 +7,12 @@ import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:net";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  BROWSER_ACP_APP_SUPPORT_DIR_NAME,
+  DAEMON_LOG_FILE_NAME,
+  DAEMON_STATE_FILE_NAME,
+  createDaemonBaseUrl,
+} from "@browser-acp/config";
 import type { NativeHostBootstrapResponse } from "@browser-acp/shared-types";
 import { createFileDebugLogger } from "./debugLog.js";
 
@@ -34,8 +40,6 @@ interface EnsureDaemonRunningOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const DAEMON_STATE_FILE = "daemon-state.json";
-const LOG_FILE = "daemon.log";
 const execFile = promisify(execFileCallback);
 const DAEMON_READY_RETRY_DELAY_MS = 150;
 const DAEMON_READY_MAX_ATTEMPTS = 40;
@@ -45,8 +49,8 @@ export async function ensureDaemonRunning(
 ): Promise<NativeHostBootstrapResponse> {
   await mkdir(options.rootDir, { recursive: true });
 
-  const statePath = join(options.rootDir, DAEMON_STATE_FILE);
-  const logPath = join(options.rootDir, LOG_FILE);
+  const statePath = join(options.rootDir, DAEMON_STATE_FILE_NAME);
+  const logPath = join(options.rootDir, DAEMON_LOG_FILE_NAME);
   const logger = createFileDebugLogger(logPath);
   const healthCheck = options.healthCheck ?? defaultHealthCheck;
   const startDaemon = options.startDaemon ?? defaultStartDaemon;
@@ -113,8 +117,8 @@ export async function ensureDaemonRunning(
 }
 
 export async function getDaemonStatus(rootDir: string): Promise<NativeHostBootstrapResponse> {
-  const state = await readState(join(rootDir, DAEMON_STATE_FILE));
-  const logPath = join(rootDir, LOG_FILE);
+  const state = await readState(join(rootDir, DAEMON_STATE_FILE_NAME));
+  const logPath = join(rootDir, DAEMON_LOG_FILE_NAME);
   const logger = createFileDebugLogger(logPath);
   await logger.log("native-host", "daemon status requested", {
     rootDir,
@@ -148,7 +152,7 @@ export async function getDaemonStatus(rootDir: string): Promise<NativeHostBootst
 }
 
 export function getDefaultRootDir(): string {
-  return join(homedir(), "Library", "Application Support", "browser-acp");
+  return join(homedir(), "Library", "Application Support", BROWSER_ACP_APP_SUPPORT_DIR_NAME);
 }
 
 async function readState(statePath: string): Promise<DaemonState | undefined> {
@@ -162,7 +166,7 @@ async function readState(statePath: string): Promise<DaemonState | undefined> {
 
 async function defaultHealthCheck(state: DaemonState): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${state.port}/health`, {
+    const response = await fetch(`${createDaemonBaseUrl(state.port)}/health`, {
       headers: {
         Authorization: `Bearer ${state.token}`,
       },

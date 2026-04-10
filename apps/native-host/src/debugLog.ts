@@ -1,8 +1,7 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DAEMON_LOG_FILE_NAME } from "@browser-acp/config";
 import type { DebugLogEntry } from "@browser-acp/shared-types";
-
-const LOG_FILE = "daemon.log";
 
 export interface FileDebugLogger {
   log(scope: string, message: string, details?: unknown): Promise<void>;
@@ -29,7 +28,7 @@ export async function appendRootDebugLog(
   message: string,
   details?: unknown,
 ): Promise<void> {
-  await createFileDebugLogger(join(rootDir, LOG_FILE)).log(scope, message, details);
+  await createFileDebugLogger(join(rootDir, DAEMON_LOG_FILE_NAME)).log(scope, message, details);
 }
 
 function sanitizeDebugValue(value: unknown, depth = 0): unknown {

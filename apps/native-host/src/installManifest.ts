@@ -3,6 +3,11 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  BROWSER_ACP_APP_SUPPORT_DIR_NAME,
+  BROWSER_ACP_EXTENSION_NAME,
+  BROWSER_ACP_NATIVE_HOST_NAME,
+} from "@browser-acp/config";
 
 export interface NativeHostManifest {
   name: string;
@@ -24,8 +29,8 @@ interface InstallManifestOptions {
   nodePath?: string;
 }
 
-const HOST_NAME = "com.browser_acp.host";
-const EXTENSION_NAME = "Browser ACP";
+const HOST_NAME = BROWSER_ACP_NATIVE_HOST_NAME;
+const EXTENSION_NAME = BROWSER_ACP_EXTENSION_NAME;
 
 export function collectExtensionIdsFromPreferences(preferencePayloads: unknown[]): string[] {
   const extensionIds = new Set<string>();
@@ -135,7 +140,7 @@ export async function installChromeNativeHost(
     );
   }
 
-  const hostRootDir = options.hostRootDir ?? join(homedir(), "Library", "Application Support", "browser-acp");
+  const hostRootDir = options.hostRootDir ?? join(homedir(), "Library", "Application Support", BROWSER_ACP_APP_SUPPORT_DIR_NAME);
   const manifestDir = join(homedir(), "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
   const launcherPath = join(hostRootDir, "bin", HOST_NAME);
   const manifestPath = join(manifestDir, `${HOST_NAME}.json`);

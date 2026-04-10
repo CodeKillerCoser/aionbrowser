@@ -1,3 +1,10 @@
+import {
+  BROWSER_ACP_NATIVE_HOST_NAME,
+  DAEMON_BASE_ORIGIN,
+  EXTENSION_STORAGE_KEYS,
+  SELECTION_ACTION_PROMPTS,
+  createDaemonBaseUrl,
+} from "@browser-acp/config";
 import type { BrowserContextBundle, BrowserTabPreview, NativeHostBootstrapResponse, ResolvedAgent, ConversationSummary, DebugLogEntry } from "@browser-acp/shared-types";
 import type {
   BackgroundDebugLogEntry,
@@ -12,10 +19,6 @@ import { resolveSelectionText } from "./contextState";
 import { mergeFramePageContexts } from "./frameContext";
 import { capturePageContextInPage } from "./pageCapture";
 
-const NATIVE_HOST_NAME = "com.browser_acp.host";
-const DAEMON_BASE_URL = "http://127.0.0.1";
-const DEBUG_STORAGE_KEY = "browser-acp-debug-logs";
-const PENDING_SELECTION_ACTION_STORAGE_KEY = "browser-acp-pending-selection-action";
 const DEBUG_LOG_LIMIT = 120;
 
 const contextByTabId = new Map<number, BrowserContextBundle>();
@@ -375,16 +378,7 @@ function isPageContextPayload(value: unknown): value is PageContextPayload {
 }
 
 function buildSelectionActionPrompt(action: SelectionActionType, selectionText: string): string {
-  const trimmedSelectionText = selectionText.trim();
-  if (action === "explain") {
-    return `请解释下面这段内容，结合当前页面上下文说明重点和含义：\n\n${trimmedSelectionText}`;
-  }
-
-  if (action === "search") {
-    return `请基于下面这段内容，提炼搜索关键词、核心问题，并给出后续搜索方向：\n\n${trimmedSelectionText}`;
-  }
-
-  return `请基于下面这段内容，给出具体样例或示例代码，并说明如何使用：\n\n${trimmedSelectionText}`;
+  return SELECTION_ACTION_PROMPTS[action](selectionText);
 }
 
 async function ensureDaemon(): Promise<NativeHostBootstrapResponse> {
@@ -397,7 +391,7 @@ async function ensureDaemon(): Promise<NativeHostBootstrapResponse> {
   }
 
   await recordDebugLog("native-host", "requesting daemon bootstrap", {
-    host: NATIVE_HOST_NAME,
+    host: BROWSER_ACP_NATIVE_HOST_NAME,
   });
   bootstrapCache = await sendNativeMessage({
     command: "ensureDaemon",
@@ -423,7 +417,7 @@ async function fetchDaemonJson<T>(
   });
   let response: Response;
   try {
-    response = await fetch(`${DAEMON_BASE_URL}:${bootstrap.port}${path}`, {
+    response = await fetch(`${createDaemonBaseUrl(bootstrap.port!)}${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${bootstrap.token}`,
@@ -457,7 +451,7 @@ async function fetchDaemonJson<T>(
 
 function sendNativeMessage(message: { command: "ensureDaemon" | "getDaemonStatus" | "openLogs" }): Promise<NativeHostBootstrapResponse> {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
+    chrome.runtime.sendNativeMessage(BROWSER_ACP_NATIVE_HOST_NAME, message, (response) => {
       const lastError = chrome.runtime.lastError;
       if (lastError) {
         void recordDebugLog("native-host", "native message failed", {
@@ -508,8 +502,8 @@ async function getDebugState(): Promise<BackgroundDebugState> {
 
   return {
     extensionId: chrome.runtime.id,
-    nativeHostName: NATIVE_HOST_NAME,
-    daemonBaseUrl: DAEMON_BASE_URL,
+    nativeHostName: BROWSER_ACP_NATIVE_HOST_NAME,
+    daemonBaseUrl: DAEMON_BASE_ORIGIN,
     bootstrapCache,
     daemonStatus,
     daemonLogs,
@@ -524,8 +518,8 @@ async function hydrateDebugLogs(): Promise<void> {
 
   debugLogsHydrated = true;
   try {
-    const stored = await chrome.storage.local.get(DEBUG_STORAGE_KEY);
-    const persistedLogs = stored[DEBUG_STORAGE_KEY];
+    const stored = await chrome.storage.local.get(EXTENSION_STORAGE_KEYS.debugLogs);
+    const persistedLogs = stored[EXTENSION_STORAGE_KEYS.debugLogs];
     if (Array.isArray(persistedLogs)) {
       debugLogs.splice(0, debugLogs.length, ...persistedLogs.slice(-DEBUG_LOG_LIMIT));
     }
@@ -536,14 +530,14 @@ async function hydrateDebugLogs(): Promise<void> {
 
 async function persistPendingSelectionAction(action: PendingSelectionAction): Promise<void> {
   await chrome.storage.local.set({
-    [PENDING_SELECTION_ACTION_STORAGE_KEY]: action,
+    [EXTENSION_STORAGE_KEYS.pendingSelectionAction]: action,
   });
 }
 
 async function loadPendingSelectionAction(): Promise<PendingSelectionAction | null> {
   try {
-    const stored = await chrome.storage.local.get(PENDING_SELECTION_ACTION_STORAGE_KEY);
-    const persistedAction = stored[PENDING_SELECTION_ACTION_STORAGE_KEY];
+    const stored = await chrome.storage.local.get(EXTENSION_STORAGE_KEYS.pendingSelectionAction);
+    const persistedAction = stored[EXTENSION_STORAGE_KEYS.pendingSelectionAction];
     return isPendingSelectionAction(persistedAction) ? persistedAction : null;
   } catch {
     return null;
@@ -553,7 +547,7 @@ async function loadPendingSelectionAction(): Promise<PendingSelectionAction | nu
 async function clearPendingSelectionAction(): Promise<void> {
   try {
     await chrome.storage.local.set({
-      [PENDING_SELECTION_ACTION_STORAGE_KEY]: null,
+      [EXTENSION_STORAGE_KEYS.pendingSelectionAction]: null,
     });
   } catch {
     // Ignore storage persistence failures.
@@ -582,7 +576,7 @@ async function recordDebugLog(
   console.info(`[Browser ACP][${scope}] ${message}`, entry.details);
   try {
     await chrome.storage.local.set({
-      [DEBUG_STORAGE_KEY]: debugLogs,
+      [EXTENSION_STORAGE_KEYS.debugLogs]: debugLogs,
     });
   } catch {
     // Ignore storage persistence failures.

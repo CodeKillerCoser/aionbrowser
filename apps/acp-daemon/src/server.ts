@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { DAEMON_BASE_ORIGIN, DAEMON_LOG_FILE_NAME } from "@browser-acp/config";
 import { readPersistedDebugLogs } from "./debug/persistedLogs.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -25,7 +26,7 @@ interface StartedDaemonApp {
 export function createDaemonApp(options: CreateDaemonAppOptions) {
   const store = new SessionStore(options.rootDir);
   const logger = options.logger ?? createDebugLogger();
-  const logPath = join(options.rootDir, "daemon.log");
+  const logPath = join(options.rootDir, DAEMON_LOG_FILE_NAME);
   const manager = new SessionManager({
     store,
     defaultCwd: options.defaultCwd,
@@ -40,7 +41,7 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
   const wsServer = new WebSocketServer({ noServer: true });
   const httpServer = createServer(async (request, response) => {
     const method = request.method ?? "GET";
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const url = new URL(request.url ?? "/", DAEMON_BASE_ORIGIN);
     logger.log("http", "daemon HTTP request received", {
       method,
       path: url.pathname,
@@ -111,7 +112,7 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
   });
 
   wsServer.on("connection", async (socket, request) => {
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const url = new URL(request.url ?? "/", DAEMON_BASE_ORIGIN);
     const sessionId = url.pathname.split("/").pop();
     logger.log("ws", "websocket session connected", {
       sessionId,
