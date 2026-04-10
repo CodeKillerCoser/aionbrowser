@@ -7,6 +7,7 @@ import { createServer, type Server } from "node:net";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  DAEMON_HOST,
   DAEMON_LOG_FILE_NAME,
   DAEMON_STATE_FILE_NAME,
   createDaemonBaseUrl,
@@ -271,7 +272,7 @@ function resolveDaemonEntry(): { command: string; args: string[] } {
 async function pickAvailablePort(): Promise<number> {
   return new Promise<number>((resolvePromise, reject) => {
     const server: Server = createServer();
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, DAEMON_HOST, () => {
       const address = server.address();
       if (!address || typeof address === "string") {
         reject(new Error("Failed to pick a port"));

@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { BROWSER_ACP_APP_SUPPORT_DIR_NAME } from "@browser-acp/config";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createDebugLogger } from "./debug/logger.js";
@@ -9,7 +10,7 @@ export { createDaemonApp } from "./server.js";
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const options = parseCliArgs(process.argv.slice(2));
-  const rootDir = options.rootDir ?? join(homedir(), "Library", "Application Support", "browser-acp");
+  const rootDir = options.rootDir ?? join(homedir(), "Library", "Application Support", BROWSER_ACP_APP_SUPPORT_DIR_NAME);
 
   await mkdir(rootDir, { recursive: true });
   const logger = createDebugLogger();

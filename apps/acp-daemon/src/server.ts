@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { DAEMON_BASE_ORIGIN, DAEMON_LOG_FILE_NAME } from "@browser-acp/config";
+import { DAEMON_BASE_ORIGIN, DAEMON_HOST, DAEMON_LOG_FILE_NAME } from "@browser-acp/config";
 import { createSessionService } from "./application/sessionService.js";
 import { DEFAULT_MAX_ACTIVE_RUNTIMES } from "./config/daemonConfig.js";
 import { readPersistedDebugLogs } from "./debug/persistedLogs.js";
@@ -205,7 +205,7 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
   return {
     async start(): Promise<StartedDaemonApp> {
       await new Promise<void>((resolve) => {
-        httpServer.listen(options.port, "127.0.0.1", () => resolve());
+        httpServer.listen(options.port, DAEMON_HOST, () => resolve());
       });
 
       const address = httpServer.address();

@@ -1,3 +1,4 @@
+import { createDaemonBaseUrl } from "@browser-acp/config";
 import type {
   BrowserContextBundle,
   ConversationSummary,
@@ -62,7 +63,14 @@ export function createChromeBridge(): BrowserAcpBridge {
       onError: (error: string) => void,
       onStatus?: (status: "open" | "close" | "error", details?: Record<string, unknown>) => void,
     ): BrowserAcpSocket => {
-      const socket = new WebSocket(`ws://127.0.0.1:${bootstrap.port}/sessions/${sessionId}?token=${bootstrap.token}`);
+      if (!bootstrap.ok || bootstrap.port === undefined || !bootstrap.token) {
+        throw new Error("Daemon bootstrap is incomplete.");
+      }
+
+      const websocketUrl = new URL(`/sessions/${sessionId}`, createDaemonBaseUrl(bootstrap.port));
+      websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
+      websocketUrl.searchParams.set("token", bootstrap.token);
+      const socket = new WebSocket(websocketUrl.toString());
       const pendingMessages: string[] = [];
       socket.addEventListener("open", () => {
         while (pendingMessages.length > 0) {
