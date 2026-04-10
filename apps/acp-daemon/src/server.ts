@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { DAEMON_BASE_ORIGIN, DAEMON_LOG_FILE_NAME } from "@browser-acp/config";
+import { createSessionService } from "./application/sessionService.js";
+import { DEFAULT_MAX_ACTIVE_RUNTIMES } from "./config/daemonConfig.js";
 import { readPersistedDebugLogs } from "./debug/persistedLogs.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -31,12 +33,13 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
     store,
     defaultCwd: options.defaultCwd,
     logger,
-    maxActiveRuntimes: 3,
+    maxActiveRuntimes: DEFAULT_MAX_ACTIVE_RUNTIMES,
     resolveAgent: async (agentId) => {
       const agents = await options.listAgents();
       return agents.find((entry) => entry.id === agentId) ?? null;
     },
   });
+  const sessions = createSessionService({ manager });
 
   const wsServer = new WebSocketServer({ noServer: true });
   const httpServer = createServer(async (request, response) => {
@@ -68,7 +71,7 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
       }
 
       if (method === "GET" && url.pathname === "/sessions") {
-        writeJson(response, 200, await manager.listSessions());
+        writeJson(response, 200, await sessions.list());
         return;
       }
 
@@ -93,7 +96,7 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
           return;
         }
 
-        const summary = await manager.createSession({
+        const summary = await sessions.create({
           agent,
           context,
         });
@@ -157,11 +160,11 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
       }
     });
 
-    const unsubscribe = manager.subscribe(sessionId, (event) => {
+    const unsubscribe = sessions.subscribe(sessionId, (event) => {
       socket.send(JSON.stringify({ type: "event", event } satisfies SessionSocketServerMessage));
     });
 
-    const transcript = await manager.readTranscript(sessionId);
+    const transcript = await sessions.readTranscript(sessionId);
     transcript.forEach((event) => {
       socket.send(JSON.stringify({ type: "event", event } satisfies SessionSocketServerMessage));
     });

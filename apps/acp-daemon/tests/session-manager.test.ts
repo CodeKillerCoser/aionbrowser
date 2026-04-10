@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserContextBundle, PromptEnvelope, ResolvedAgent } from "@browser-acp/shared-types";
+import { createSessionService } from "../src/application/sessionService.js";
 import { SessionManager } from "../src/session/sessionManager.js";
 import { SessionStore } from "../src/store/sessionStore.js";
 
@@ -15,6 +16,24 @@ afterEach(() => {
 });
 
 describe("SessionManager runtime lifecycle", () => {
+  it("delegates session queries through the application service", async () => {
+    const listSessions = vi.fn().mockResolvedValue([{ id: "session-1" }]);
+    const manager = {
+      listSessions,
+      createSession: vi.fn(),
+      readTranscript: vi.fn(),
+      sendPrompt: vi.fn(),
+      subscribe: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as SessionManager;
+
+    const service = createSessionService({ manager });
+    const result = await service.list();
+
+    expect(listSessions).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([{ id: "session-1" }]);
+  });
+
   it("evicts the least recently used runtime and resumes an existing session on demand", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
     tempDirs.push(rootDir);

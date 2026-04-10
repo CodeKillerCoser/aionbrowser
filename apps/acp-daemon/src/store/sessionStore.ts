@@ -2,14 +2,15 @@ import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ConversationSummary, SessionEvent } from "@browser-acp/shared-types";
+import { SESSIONS_DIR_NAME, SESSIONS_INDEX_FILE_NAME } from "../config/daemonConfig.js";
 
 export class SessionStore {
   private readonly sessionsDir: string;
   private readonly sessionsIndexPath: string;
 
   constructor(private readonly rootDir: string) {
-    this.sessionsDir = join(rootDir, "sessions");
-    this.sessionsIndexPath = join(rootDir, "sessions-index.json");
+    this.sessionsDir = join(rootDir, SESSIONS_DIR_NAME);
+    this.sessionsIndexPath = join(rootDir, SESSIONS_INDEX_FILE_NAME);
   }
 
   async saveSummary(summary: ConversationSummary): Promise<void> {

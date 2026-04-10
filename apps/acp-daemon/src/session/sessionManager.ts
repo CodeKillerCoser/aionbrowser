@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ConversationSummary, PromptEnvelope, ResolvedAgent, SessionEvent } from "@browser-acp/shared-types";
+import { DEFAULT_MAX_ACTIVE_RUNTIMES } from "../config/daemonConfig.js";
 import type { DebugLogger } from "../debug/logger.js";
 import { SessionStore } from "../store/sessionStore.js";
 import { RuntimeSession, type RuntimeSessionCreateInput, type RuntimeSessionLike } from "./runtimeSession.js";
@@ -289,7 +290,7 @@ export class SessionManager {
   }
 
   private async evictRuntimeIfNeeded(exemptSessionId?: string): Promise<void> {
-    const maxActiveRuntimes = this.options.maxActiveRuntimes ?? 3;
+    const maxActiveRuntimes = this.options.maxActiveRuntimes ?? DEFAULT_MAX_ACTIVE_RUNTIMES;
 
     while (this.runtimes.size >= maxActiveRuntimes) {
       const nextEviction = [...this.runtimeLastUsedAt.entries()]
