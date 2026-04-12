@@ -64,18 +64,21 @@ describe("SessionManager runtime lifecycle", () => {
     const runtimeOne = {
       sessionId: "session-1",
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),
     };
     const runtimeTwo = {
       sessionId: "session-2",
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),
     };
     const resumedRuntimeOne = {
       sessionId: "session-1",
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),
     };

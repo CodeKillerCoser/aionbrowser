@@ -2,6 +2,7 @@ import type {
   BrowserContextBundle,
   ConversationSummary,
   NativeHostBootstrapResponse,
+  PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
   SessionSocketServerMessage,
@@ -10,6 +11,7 @@ import type { BackgroundDebugState, PendingSelectionAction } from "../messages";
 
 export interface BrowserAcpSocket {
   sendPrompt(prompt: PromptEnvelope): void;
+  resolvePermission(decision: PermissionDecision): void;
   close(): void;
 }
 

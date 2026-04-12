@@ -1,8 +1,9 @@
-import { createDaemonBaseUrl } from "@browser-acp/config";
+import { EXTENSION_STORAGE_KEYS, createDaemonBaseUrl } from "@browser-acp/config";
 import type {
   BrowserContextBundle,
   ConversationSummary,
   NativeHostBootstrapResponse,
+  PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
   SessionSocketServerMessage,
@@ -38,15 +39,30 @@ export function createChromeBridge(): BrowserAcpBridge {
         type: "browser-acp/claim-pending-selection-action",
       }),
     subscribeToSelectionActions(onReady: () => void) {
-      const listener = (message: BackgroundRuntimeMessage) => {
+      const runtimeListener = (message: BackgroundRuntimeMessage) => {
         if (message.type === "browser-acp/selection-action-ready") {
           onReady();
         }
       };
+      const storageListener = (
+        changes: Record<string, chrome.storage.StorageChange>,
+        areaName: string,
+      ) => {
+        if (areaName !== "local") {
+          return;
+        }
 
-      chrome.runtime.onMessage.addListener(listener);
+        const pendingSelectionActionChange = changes[EXTENSION_STORAGE_KEYS.pendingSelectionAction];
+        if (pendingSelectionActionChange?.newValue) {
+          onReady();
+        }
+      };
+
+      chrome.runtime.onMessage.addListener(runtimeListener);
+      chrome.storage?.onChanged?.addListener?.(storageListener);
       return () => {
-        chrome.runtime.onMessage.removeListener(listener);
+        chrome.runtime.onMessage.removeListener(runtimeListener);
+        chrome.storage?.onChanged?.removeListener?.(storageListener);
       };
     },
     getDebugState: async () => sendMessage<BackgroundDebugState>({ type: "browser-acp/get-debug-state" }),
@@ -102,6 +118,19 @@ export function createChromeBridge(): BrowserAcpBridge {
           const payload = JSON.stringify({
             type: "sendPrompt",
             prompt,
+          });
+
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(payload);
+            return;
+          }
+
+          pendingMessages.push(payload);
+        },
+        resolvePermission(decision: PermissionDecision) {
+          const payload = JSON.stringify({
+            type: "resolvePermission",
+            decision,
           });
 
           if (socket.readyState === WebSocket.OPEN) {

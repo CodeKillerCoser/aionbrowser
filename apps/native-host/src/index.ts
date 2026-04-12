@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import type { NativeHostBootstrapRequest, NativeHostBootstrapResponse } from "@browser-acp/shared-types";
 import { ensureDaemonRunning, getDaemonStatus, getDefaultRootDir } from "./daemonBootstrap.js";
 import { appendRootDebugLog } from "./debugLog.js";
@@ -26,7 +27,7 @@ async function handleRequest(
   if (request.command === "ensureDaemon") {
     return ensureDaemonRunning({
       rootDir,
-      defaultCwd: process.cwd(),
+      defaultCwd: process.env.HOME || homedir(),
     });
   }
 

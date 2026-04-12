@@ -150,6 +150,17 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
             sessionId,
           });
           await manager.cancel(sessionId);
+          return;
+        }
+
+        if (message.type === "resolvePermission" && message.decision) {
+          logger.log("ws", "websocket permission decision received", {
+            sessionId,
+            permissionId: message.decision.permissionId,
+            outcome: message.decision.outcome,
+            optionId: message.decision.optionId,
+          });
+          await manager.resolvePermission(sessionId, message.decision);
         }
       } catch (error) {
         logger.log("ws", "websocket message handling failed", error);

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EXTENSION_STORAGE_KEYS } from "@browser-acp/config";
 import type { PromptEnvelope } from "@browser-acp/shared-types";
 import { createChromeBridge } from "../src/sidepanel/bridge";
 
@@ -91,11 +92,18 @@ describe("createChromeBridge", () => {
 
   it("subscribes to quick action notifications from the background runtime bridge", () => {
     let listener: ((message: { type: string }) => void) | undefined;
+    let storageListener:
+      | ((changes: Record<string, { newValue?: unknown }>, areaName: string) => void)
+      | undefined;
     const sendMessage = vi.fn();
     const addListener = vi.fn((nextListener) => {
       listener = nextListener;
     });
     const removeListener = vi.fn();
+    const addStorageListener = vi.fn((nextListener) => {
+      storageListener = nextListener;
+    });
+    const removeStorageListener = vi.fn();
 
     vi.stubGlobal("chrome", {
       runtime: {
@@ -104,6 +112,12 @@ describe("createChromeBridge", () => {
         onMessage: {
           addListener,
           removeListener,
+        },
+      },
+      storage: {
+        onChanged: {
+          addListener: addStorageListener,
+          removeListener: removeStorageListener,
         },
       },
     });
@@ -117,10 +131,25 @@ describe("createChromeBridge", () => {
     });
 
     expect(addListener).toHaveBeenCalledTimes(1);
+    expect(addStorageListener).toHaveBeenCalledTimes(1);
     expect(onQuickAction).toHaveBeenCalledTimes(1);
+
+    storageListener?.(
+      {
+        [EXTENSION_STORAGE_KEYS.pendingSelectionAction]: {
+          newValue: {
+            id: "action-2",
+          },
+        },
+      },
+      "local",
+    );
+
+    expect(onQuickAction).toHaveBeenCalledTimes(2);
 
     unsubscribe();
     expect(removeListener).toHaveBeenCalledTimes(1);
+    expect(removeStorageListener).toHaveBeenCalledTimes(1);
   });
 
   it("queues prompts until the websocket opens", () => {
@@ -164,6 +193,43 @@ describe("createChromeBridge", () => {
     expect(JSON.parse(socket.sent[0])).toEqual({
       type: "sendPrompt",
       prompt,
+    });
+  });
+
+  it("queues permission decisions until the websocket opens", () => {
+    const socket = new FakeWebSocket("ws://127.0.0.1:9000");
+    const webSocketConstructor = vi.fn(() => socket);
+    vi.stubGlobal("WebSocket", webSocketConstructor);
+
+    const bridge = createChromeBridge();
+    const session = bridge.connectSession(
+      {
+        ok: true,
+        port: 9000,
+        token: "token",
+      },
+      "session-1",
+      vi.fn(),
+      vi.fn(),
+    );
+
+    session.resolvePermission({
+      permissionId: "permission-1",
+      outcome: "selected",
+      optionId: "allow-once",
+    });
+    expect(socket.sent).toEqual([]);
+
+    socket.emit("open");
+
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: "resolvePermission",
+      decision: {
+        permissionId: "permission-1",
+        outcome: "selected",
+        optionId: "allow-once",
+      },
     });
   });
 });

@@ -108,6 +108,18 @@ describe("createDaemonApp", () => {
           return;
         }
 
+        if (message.type === "event" && message.event?.type === "permission.requested") {
+          socket.send(JSON.stringify({
+            type: "resolvePermission",
+            decision: {
+              permissionId: message.event.permissionId,
+              outcome: "selected",
+              optionId: message.event.options[0]?.optionId,
+            },
+          }));
+          return;
+        }
+
         if (message.type === "event" && message.event?.type === "turn.completed") {
           socket.close();
           resolvePromise(messages);

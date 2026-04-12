@@ -75,6 +75,63 @@ export interface ConversationSummary {
   readOnly: boolean;
 }
 
+export type ToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "switch_mode"
+  | "other";
+
+export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export type PermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+export interface ToolCallLocationSummary {
+  path: string;
+  line?: number | null;
+}
+
+export interface ToolCallContentSummary {
+  type: "text" | "image" | "audio" | "resource_link" | "resource" | "diff" | "terminal";
+  text?: string;
+  mimeType?: string;
+  uri?: string;
+  name?: string;
+  title?: string;
+  path?: string;
+  oldText?: string | null;
+  newText?: string;
+  terminalId?: string;
+}
+
+export interface ToolCallSnapshot {
+  toolCallId: string;
+  title?: string | null;
+  kind?: ToolKind | null;
+  status?: ToolCallStatus | null;
+  locations?: ToolCallLocationSummary[] | null;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+  content?: ToolCallContentSummary[] | null;
+}
+
+export interface PermissionOptionSummary {
+  optionId: string;
+  kind: PermissionOptionKind;
+  name: string;
+}
+
+export interface PermissionDecision {
+  permissionId: string;
+  outcome: "selected" | "cancelled";
+  optionId?: string;
+}
+
 export type SessionEvent =
   | {
       type: "session.started";
@@ -124,6 +181,39 @@ export type SessionEvent =
       sessionId: string;
       turnId: string;
       context: BrowserContextBundle;
+    }
+  | {
+      type: "tool.call";
+      sessionId: string;
+      turnId: string | null;
+      createdAt: string;
+      toolCall: ToolCallSnapshot;
+    }
+  | {
+      type: "tool.call.update";
+      sessionId: string;
+      turnId: string | null;
+      createdAt: string;
+      toolCall: ToolCallSnapshot;
+    }
+  | {
+      type: "permission.requested";
+      sessionId: string;
+      turnId: string | null;
+      permissionId: string;
+      createdAt: string;
+      toolCall: ToolCallSnapshot;
+      options: PermissionOptionSummary[];
+    }
+  | {
+      type: "permission.resolved";
+      sessionId: string;
+      turnId: string | null;
+      permissionId: string;
+      createdAt: string;
+      toolCallId: string;
+      outcome: "selected" | "cancelled";
+      selectedOption?: PermissionOptionSummary | null;
     };
 
 export interface NativeHostBootstrapRequest {
@@ -139,10 +229,18 @@ export interface NativeHostBootstrapResponse {
   message?: string;
 }
 
-export interface SessionSocketClientMessage {
-  type: "sendPrompt" | "cancelTurn";
-  prompt?: PromptEnvelope;
-}
+export type SessionSocketClientMessage =
+  | {
+      type: "sendPrompt";
+      prompt: PromptEnvelope;
+    }
+  | {
+      type: "cancelTurn";
+    }
+  | {
+      type: "resolvePermission";
+      decision: PermissionDecision;
+    };
 
 export interface SessionSocketServerMessage {
   type: "event" | "error";

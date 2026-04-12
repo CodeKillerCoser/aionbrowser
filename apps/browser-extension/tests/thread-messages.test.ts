@@ -37,15 +37,17 @@ describe("buildThreadMessages", () => {
       },
     ];
 
-    const messages = buildThreadMessages(events);
+    const items = buildThreadMessages(events);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toMatchObject({
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      kind: "message",
       id: "user-turn-1",
       role: "user",
       content: [{ type: "text", text: "Explain this commit" }],
     });
-    expect(messages[1]).toMatchObject({
+    expect(items[1]).toMatchObject({
+      kind: "message",
       id: "assistant-turn-1",
       role: "assistant",
       content: [{ type: "text", text: "This is merged." }],
@@ -72,10 +74,11 @@ describe("buildThreadMessages", () => {
       },
     ];
 
-    const messages = buildThreadMessages(events);
+    const items = buildThreadMessages(events);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[1]).toMatchObject({
+    expect(items).toHaveLength(2);
+    expect(items[1]).toMatchObject({
+      kind: "message",
       id: "assistant-turn-2",
       role: "assistant",
       content: [{ type: "text", text: "Still streaming" }],
@@ -83,7 +86,7 @@ describe("buildThreadMessages", () => {
     });
   });
 
-  it("ignores out-of-band system markers and keeps thought text out of the visible assistant reply", () => {
+  it("renders thought text as a dedicated system row while keeping the assistant reply clean", () => {
     const events: SessionEvent[] = [
       {
         type: "turn.delta",
@@ -125,20 +128,29 @@ describe("buildThreadMessages", () => {
       },
     ];
 
-    const messages = buildThreadMessages(events);
+    const items = buildThreadMessages(events);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toMatchObject({
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({
+      kind: "message",
       id: "user-turn-3",
       content: [{ type: "text", text: "Who are you?" }],
     });
-    expect(messages[1]).toMatchObject({
+    expect(items[1]).toMatchObject({
+      kind: "system",
+      systemType: "thought",
+      id: "thought-turn-3",
+      text: "Thinking about it.",
+      status: "complete",
+    });
+    expect(items[2]).toMatchObject({
+      kind: "message",
       id: "assistant-turn-3",
       content: [{ type: "text", text: "I am Browser ACP." }],
       status: { type: "complete", reason: "stop" },
-    });
-    expect(messages[1]?.metadata?.custom).toMatchObject({
-      thought: "Thinking about it.",
+      metadata: {
+        thought: "Thinking about it.",
+      },
     });
   });
 
@@ -153,14 +165,116 @@ describe("buildThreadMessages", () => {
       },
     ];
 
-    const messages = buildThreadMessages(events);
+    const items = buildThreadMessages(events);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[1]).toMatchObject({
+    expect(items).toHaveLength(2);
+    expect(items[1]).toMatchObject({
+      kind: "message",
       id: "assistant-turn-4",
       role: "assistant",
       content: [],
       status: { type: "running" },
+    });
+  });
+
+  it("aggregates tool calls and permission events into dedicated system rows", () => {
+    const events: SessionEvent[] = [
+      {
+        type: "turn.started",
+        sessionId: "session-1",
+        turnId: "turn-5",
+        prompt: "Read config",
+        startedAt: "2026-04-08T06:03:00.000Z",
+      },
+      {
+        type: "tool.call",
+        sessionId: "session-1",
+        turnId: "turn-5",
+        createdAt: "2026-04-08T06:03:01.000Z",
+        toolCall: {
+          toolCallId: "tool-1",
+          title: "Read package.json",
+          kind: "read",
+          status: "pending",
+          rawInput: {
+            path: "package.json",
+          },
+        },
+      },
+      {
+        type: "permission.requested",
+        sessionId: "session-1",
+        turnId: "turn-5",
+        permissionId: "permission-1",
+        createdAt: "2026-04-08T06:03:02.000Z",
+        toolCall: {
+          toolCallId: "tool-1",
+          title: "Read package.json",
+          kind: "read",
+          status: "pending",
+        },
+        options: [
+          {
+            optionId: "allow-once",
+            kind: "allow_once",
+            name: "Allow once",
+          },
+        ],
+      },
+      {
+        type: "permission.resolved",
+        sessionId: "session-1",
+        turnId: "turn-5",
+        permissionId: "permission-1",
+        createdAt: "2026-04-08T06:03:03.000Z",
+        toolCallId: "tool-1",
+        outcome: "selected",
+        selectedOption: {
+          optionId: "allow-once",
+          kind: "allow_once",
+          name: "Allow once",
+        },
+      },
+      {
+        type: "tool.call.update",
+        sessionId: "session-1",
+        turnId: "turn-5",
+        createdAt: "2026-04-08T06:03:04.000Z",
+        toolCall: {
+          toolCallId: "tool-1",
+          status: "completed",
+          rawOutput: {
+            name: "browser_acp",
+          },
+        },
+      },
+    ];
+
+    const items = buildThreadMessages(events);
+
+    expect(items).toHaveLength(4);
+    expect(items[1]).toMatchObject({
+      kind: "system",
+      systemType: "tool",
+      toolCall: {
+        toolCallId: "tool-1",
+        title: "Read package.json",
+        kind: "read",
+        status: "completed",
+        rawOutput: {
+          name: "browser_acp",
+        },
+      },
+    });
+    expect(items[2]).toMatchObject({
+      kind: "system",
+      systemType: "permission",
+      permissionId: "permission-1",
+      outcome: "selected",
+      selectedOption: {
+        optionId: "allow-once",
+        kind: "allow_once",
+      },
     });
   });
 });

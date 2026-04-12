@@ -245,6 +245,108 @@ describe("SessionManager ACP integration", () => {
     );
   });
 
+  it("waits for a user permission decision before resuming the runtime", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-session-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+    });
+
+    const context: BrowserContextBundle = {
+      tabId: 11,
+      url: "https://example.com/tooling",
+      title: "Tooling article",
+      selectionText: "",
+      summaryMarkdown: "",
+      openTabsPreview: [],
+      capturedAt: "2026-04-10T07:10:00.000Z",
+    };
+    const agent: ResolvedAgent = {
+      id: "tool-agent",
+      name: "Tool Agent",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: process.execPath,
+        args: [resolve("tests/fixtures/mock-tool-agent.mjs")],
+      },
+      status: "ready",
+      launchCommand: process.execPath,
+      launchArgs: [resolve("tests/fixtures/mock-tool-agent.mjs")],
+    };
+
+    const summary = await manager.createSession({
+      agent,
+      context,
+    });
+
+    const promptPromise = manager.sendPrompt({
+      sessionId: summary.id,
+      agentId: agent.id,
+      text: "Inspect package metadata",
+      context,
+    });
+
+    const permissionRequest = await waitForTranscriptEvent(
+      store,
+      summary.id,
+      (event): event is Extract<SessionEvent, { type: "permission.requested" }> =>
+        event.type === "permission.requested",
+    );
+
+    const transcriptBeforeApproval = await store.readTranscript(summary.id);
+    expect(
+      transcriptBeforeApproval.some((event) => event.type === "permission.resolved"),
+    ).toBe(false);
+
+    await manager.resolvePermission(summary.id, {
+      permissionId: permissionRequest.permissionId,
+      outcome: "selected",
+      optionId: "allow-once",
+    });
+
+    await promptPromise;
+
+    const transcript = await store.readTranscript(summary.id);
+    await manager.dispose();
+
+    expect(
+      transcript.some(
+        (event) =>
+          event.type === "tool.call" &&
+          event.toolCall.toolCallId === "tool-call-1" &&
+          event.toolCall.title === "Read package.json",
+      ),
+    ).toBe(true);
+    expect(
+      transcript.some(
+        (event) =>
+          event.type === "permission.requested" &&
+          event.toolCall.toolCallId === "tool-call-1" &&
+          event.options.some((option) => option.kind === "allow_once"),
+      ),
+    ).toBe(true);
+    expect(
+      transcript.some(
+        (event) =>
+          event.type === "permission.resolved" &&
+          event.toolCallId === "tool-call-1" &&
+          event.outcome === "selected",
+      ),
+    ).toBe(true);
+    expect(
+      transcript.some(
+        (event) =>
+          event.type === "tool.call.update" &&
+          event.toolCall.toolCallId === "tool-call-1" &&
+          event.toolCall.status === "completed",
+      ),
+    ).toBe(true);
+  });
+
   it("preserves chunk order when runtime updates arrive concurrently", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-session-"));
     tempDirs.push(rootDir);
@@ -283,6 +385,7 @@ describe("SessionManager ACP integration", () => {
               stopReason: "end_turn",
             };
           },
+          async resolvePermission() {},
           async cancel() {},
           async dispose() {},
         };
@@ -452,4 +555,23 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolvePromise) => {
     setTimeout(resolvePromise, ms);
   });
+}
+
+async function waitForTranscriptEvent<TEvent extends SessionEvent>(
+  store: SessionStore,
+  sessionId: string,
+  predicate: (event: SessionEvent) => event is TEvent,
+  attempts = 80,
+): Promise<TEvent> {
+  for (let index = 0; index < attempts; index += 1) {
+    const transcript = await store.readTranscript(sessionId);
+    const match = transcript.find(predicate);
+    if (match) {
+      return match;
+    }
+
+    await delay(25);
+  }
+
+  throw new Error(`Timed out waiting for transcript event in session ${sessionId}`);
 }

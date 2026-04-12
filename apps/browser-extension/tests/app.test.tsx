@@ -122,7 +122,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    expect(await screen.findByText("Gemini CLI")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Gemini CLI ready" })).toBeInTheDocument();
     expect(screen.getAllByText("Existing thread").length).toBeGreaterThan(0);
     expect(screen.queryByText("Important sentence")).not.toBeInTheDocument();
 
@@ -162,6 +162,7 @@ describe("BrowserAcpPanel", () => {
 
         const socket = {
           sendPrompt,
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
         queueMicrotask(() => {
@@ -174,7 +175,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
     fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
       target: { value: "Summarize the key claim." },
@@ -201,6 +202,7 @@ describe("BrowserAcpPanel", () => {
       onStatus = nextOnStatus;
       return {
         sendPrompt,
+        resolvePermission: vi.fn(),
         close: vi.fn(),
       } satisfies BrowserAcpSocket;
     });
@@ -217,7 +219,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
     fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
       target: { value: "Summarize the key claim." },
@@ -287,6 +289,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt,
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -294,7 +297,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
 
     await waitFor(() => {
       expect(bridge.claimPendingSelectionAction).toHaveBeenCalled();
@@ -378,6 +381,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -385,11 +389,12 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    expect(await screen.findByText("You")).toBeInTheDocument();
-    expect(screen.getByText("Summarize this page")).toBeInTheDocument();
-    expect(screen.getByText("Assistant")).toBeInTheDocument();
+    expect(await screen.findByText("Summarize this page")).toBeInTheDocument();
     expect(screen.getByText("Clean assistant reply")).toBeInTheDocument();
+    expect(screen.queryByText(/^You$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Assistant$/)).not.toBeInTheDocument();
     expect(screen.queryByText("Thinking through the answer.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /正在组织思路/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/assistant-turn-1/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Streaming…/)).not.toBeInTheDocument();
     expect(screen.getByTestId("session-event-log")).toHaveClass("browser-acp-transcript-scroll");
@@ -402,6 +407,377 @@ describe("BrowserAcpPanel", () => {
     expect(runtimeLogs.value).toContain("\"updateKind\": \"available_commands_update\"");
     expect(runtimeLogs.value).toContain("\"chunk\": \"Thinking through the answer.\"");
     expect(runtimeLogs.value).toContain("\"chunk\": \"Clean assistant reply\"");
+  });
+
+  it("renders tool calls and permission requests as dedicated system rows", async () => {
+    const bridge = createBridge({
+      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+        onStatus?.("open", { sessionId });
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.started",
+            sessionId,
+            turnId: "turn-tools",
+            prompt: "Inspect package metadata",
+            startedAt: "2026-04-08T07:20:00.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "tool.call",
+            sessionId,
+            turnId: "turn-tools",
+            createdAt: "2026-04-08T07:20:01.000Z",
+            toolCall: {
+              toolCallId: "tool-1",
+              title: "Read package.json",
+              kind: "read",
+              status: "pending",
+              rawInput: {
+                path: "package.json",
+              },
+            },
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "permission.requested",
+            sessionId,
+            turnId: "turn-tools",
+            permissionId: "permission-1",
+            createdAt: "2026-04-08T07:20:02.000Z",
+            toolCall: {
+              toolCallId: "tool-1",
+              title: "Read package.json",
+              kind: "read",
+              status: "pending",
+              rawInput: {
+                path: "package.json",
+              },
+            },
+            options: [
+              {
+                optionId: "allow-once",
+                kind: "allow_once",
+                name: "Allow once",
+              },
+            ],
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "permission.resolved",
+            sessionId,
+            turnId: "turn-tools",
+            permissionId: "permission-1",
+            createdAt: "2026-04-08T07:20:03.000Z",
+            toolCallId: "tool-1",
+            outcome: "selected",
+            selectedOption: {
+              optionId: "allow-once",
+              kind: "allow_once",
+              name: "Allow once",
+            },
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "tool.call.update",
+            sessionId,
+            turnId: "turn-tools",
+            createdAt: "2026-04-08T07:20:04.000Z",
+            toolCall: {
+              toolCallId: "tool-1",
+              status: "completed",
+              rawOutput: {
+                name: "browser_acp",
+              },
+            },
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.delta",
+            sessionId,
+            turnId: "turn-tools",
+            chunk: "The package is named browser_acp.",
+            role: "agent",
+            updateKind: "agent_message_chunk",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.completed",
+            sessionId,
+            turnId: "turn-tools",
+            stopReason: "end_turn",
+            completedAt: "2026-04-08T07:20:05.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+
+        return {
+          sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    expect(await screen.findByText("Inspect package metadata")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, node) =>
+          node?.classList.contains("browser-acp-system-row-summary") &&
+          (node.textContent?.includes("工具调用：read package.json") ?? false),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, node) =>
+          node?.classList.contains("browser-acp-system-row-summary") &&
+          (node.textContent?.includes("权限请求：read package.json") ?? false),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByText("已允许")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /工具结果/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /请求输入/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("可选策略：")).not.toBeInTheDocument();
+    expect(screen.queryByText(/最终选择：/)).not.toBeInTheDocument();
+    expect(screen.getByText("The package is named browser_acp.")).toBeInTheDocument();
+    expect(screen.getByTestId("session-event-log").lastElementChild).toHaveClass("browser-acp-transcript-end-spacer");
+  });
+
+  it("keeps tool call details collapsed by default and expands them on click", async () => {
+    const bridge = createBridge({
+      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+        onStatus?.("open", { sessionId });
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.started",
+            sessionId,
+            turnId: "turn-collapsible-tool",
+            prompt: "Inspect file",
+            startedAt: "2026-04-10T10:00:00.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "tool.call",
+            sessionId,
+            turnId: "turn-collapsible-tool",
+            createdAt: "2026-04-10T10:00:01.000Z",
+            toolCall: {
+              toolCallId: "tool-collapse-1",
+              title: "Read package.json",
+              kind: "read",
+              status: "pending",
+              rawInput: {
+                path: "package.json",
+              },
+            },
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "tool.call.update",
+            sessionId,
+            turnId: "turn-collapsible-tool",
+            createdAt: "2026-04-10T10:00:02.000Z",
+            toolCall: {
+              toolCallId: "tool-collapse-1",
+              status: "completed",
+              rawOutput: {
+                name: "browser_acp",
+              },
+            },
+          },
+        } satisfies SessionSocketServerMessage);
+
+        return {
+          sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    const toolSummary = await screen.findByText(
+      (_, node) =>
+        node?.classList.contains("browser-acp-system-row-summary") &&
+        (node.textContent?.includes("工具调用：read package.json") ?? false),
+    );
+    const toggle = toolSummary.closest("button");
+
+    expect(toggle).not.toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /工具结果/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("输出：")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle!);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("输出：")).toBeInTheDocument();
+    const hasToolPayload = (_: string, node: Element | null) =>
+      node?.tagName.toLowerCase() === "code" &&
+      (node.textContent?.includes('"name": "browser_acp"') ?? false);
+
+    expect(screen.getByText(hasToolPayload)).toBeInTheDocument();
+  });
+
+  it("keeps permission request details collapsed by default and expands them on click", async () => {
+    const bridge = createBridge({
+      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+        onStatus?.("open", { sessionId });
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.started",
+            sessionId,
+            turnId: "turn-collapsible-permission",
+            prompt: "Open desktop note",
+            startedAt: "2026-04-10T11:00:00.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "permission.requested",
+            sessionId,
+            turnId: "turn-collapsible-permission",
+            permissionId: "permission-collapse-1",
+            createdAt: "2026-04-10T11:00:01.000Z",
+            toolCall: {
+              toolCallId: "tool-read-desktop-note",
+              title: "Read ~/Desktop/notes.txt",
+              kind: "read",
+              status: "pending",
+              rawInput: {
+                path: "~/Desktop/notes.txt",
+              },
+            },
+            options: [
+              {
+                optionId: "allow-once",
+                kind: "allow_once",
+                name: "Allow once",
+              },
+            ],
+          },
+        } satisfies SessionSocketServerMessage);
+
+        return {
+          sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    const permissionSummary = await screen.findByText(
+      (_, node) =>
+        node?.classList.contains("browser-acp-system-row-summary") &&
+        (node.textContent?.includes("权限请求：read ~/Desktop/notes.txt") ?? false),
+    );
+    const toggle = permissionSummary.closest("button");
+
+    expect(toggle).not.toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /请求输入/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("请求输入：")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle!);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("请求输入：")).toBeInTheDocument();
+    const hasPermissionPayload = (_: string, node: Element | null) =>
+      node?.tagName.toLowerCase() === "code" &&
+      (node.textContent?.includes('"path": "~/Desktop/notes.txt"') ?? false);
+
+    expect(screen.getByText(hasPermissionPayload)).toBeInTheDocument();
+  });
+
+  it("sends a permission decision when the user approves a pending request", async () => {
+    const resolvePermission = vi.fn();
+    const bridge = createBridge({
+      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+        onStatus?.("open", { sessionId });
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.started",
+            sessionId,
+            turnId: "turn-permission",
+            prompt: "Read local file",
+            startedAt: "2026-04-10T08:10:00.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "permission.requested",
+            sessionId,
+            turnId: "turn-permission",
+            permissionId: "permission-approve",
+            createdAt: "2026-04-10T08:10:01.000Z",
+            toolCall: {
+              toolCallId: "tool-read-file",
+              title: "Read ~/Desktop/notes.txt",
+              kind: "read",
+              status: "pending",
+              rawInput: {
+                path: "~/Desktop/notes.txt",
+              },
+            },
+            options: [
+              {
+                optionId: "allow-once",
+                kind: "allow_once",
+                name: "Allow once",
+              },
+              {
+                optionId: "reject-once",
+                kind: "reject_once",
+                name: "Reject once",
+              },
+            ],
+          },
+        } satisfies SessionSocketServerMessage);
+
+        return {
+          sendPrompt: vi.fn(),
+          resolvePermission,
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    expect(await screen.findByText("Read local file")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "允许本次" }));
+
+    expect(resolvePermission).toHaveBeenCalledWith({
+      permissionId: "permission-approve",
+      outcome: "selected",
+      optionId: "allow-once",
+    });
   });
 
   it("starts a new session explicitly and sends with the Enter shortcut", async () => {
@@ -421,6 +797,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt,
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -428,8 +805,8 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
     expect(screen.getByText("Choose an agent and send your first prompt to start a reading session.")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
@@ -472,6 +849,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -480,7 +858,9 @@ describe("BrowserAcpPanel", () => {
     render(<BrowserAcpPanel bridge={bridge} />);
 
     await screen.findByText("Still there?");
-    expect(screen.getAllByText("Assistant")).toHaveLength(1);
+    expect(
+      screen.getByTestId("session-event-log").querySelectorAll(".browser-acp-thread-message-assistant"),
+    ).toHaveLength(1);
     expect(screen.getByText("Streaming…")).toBeInTheDocument();
   });
 
@@ -580,6 +960,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -587,8 +968,8 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
       target: { value: "hello" },
     });
@@ -624,6 +1005,7 @@ describe("BrowserAcpPanel", () => {
 
         return {
           sendPrompt,
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -631,7 +1013,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
     await openDebugPanel();
     expect(screen.getByText("Important sentence")).toBeInTheDocument();
 
@@ -670,7 +1052,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
     expect(bridge.subscribeToActiveContext).toHaveBeenCalledTimes(1);
     await openDebugPanel();
 
@@ -693,13 +1075,14 @@ describe("BrowserAcpPanel", () => {
       }),
       connectSession: vi.fn().mockImplementation(() => ({
         sendPrompt,
+        resolvePermission: vi.fn(),
         close: vi.fn(),
       })),
     });
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
 
     await waitFor(() => {
       expect(bridge.claimPendingSelectionAction).toHaveBeenCalled();
@@ -711,6 +1094,80 @@ describe("BrowserAcpPanel", () => {
       );
       expect(bridge.createSession).not.toHaveBeenCalled();
     });
+  });
+
+  it("reconnects a closed session websocket before dispatching a claimed selection action", async () => {
+    const firstSendPrompt = vi.fn();
+    const secondSendPrompt = vi.fn();
+    let connectCount = 0;
+    let notifySelectionAction: (() => void) | undefined;
+
+    const bridge = createBridge({
+      claimPendingSelectionAction: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: "action-reconnect",
+          action: "search",
+          selectionText: "Beta",
+          promptText: "请搜索下面这段内容相关的背景资料，并结合当前页面总结关键信息：\n\nBeta",
+          createdAt: "2026-04-10T07:40:00.000Z",
+        }),
+      subscribeToSelectionActions: vi.fn((onReady) => {
+        notifySelectionAction = onReady;
+        return vi.fn();
+      }),
+      connectSession: vi.fn().mockImplementation((_, sessionId, _onMessage, _onError, onStatus) => {
+        connectCount += 1;
+
+        if (connectCount === 1) {
+          queueMicrotask(() => {
+            onStatus?.("open", { sessionId });
+            onStatus?.("close", { sessionId, code: 1006, wasClean: false });
+          });
+
+          return {
+            sendPrompt: firstSendPrompt,
+            resolvePermission: vi.fn(),
+            close: vi.fn(),
+          } satisfies BrowserAcpSocket;
+        }
+
+        queueMicrotask(() => {
+          onStatus?.("open", { sessionId });
+        });
+
+        return {
+          sendPrompt: secondSendPrompt,
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+
+    await waitFor(() => {
+      expect(bridge.claimPendingSelectionAction).toHaveBeenCalledTimes(1);
+      expect(bridge.connectSession).toHaveBeenCalledTimes(1);
+    });
+
+    expect(notifySelectionAction).toBeTypeOf("function");
+    notifySelectionAction?.();
+
+    await waitFor(() => {
+      expect(bridge.connectSession).toHaveBeenCalledTimes(2);
+      expect(secondSendPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-1",
+          text: "请搜索下面这段内容相关的背景资料，并结合当前页面总结关键信息：\n\nBeta",
+        } satisfies Partial<PromptEnvelope>),
+      );
+    });
+
+    expect(firstSendPrompt).not.toHaveBeenCalled();
   });
 
   it("creates a new session for a claimed selection action when no session exists", async () => {
@@ -735,6 +1192,7 @@ describe("BrowserAcpPanel", () => {
         });
         return {
           sendPrompt,
+          resolvePermission: vi.fn(),
           close: vi.fn(),
         } satisfies BrowserAcpSocket;
       }),
@@ -742,7 +1200,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    await screen.findByText("Gemini CLI");
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
 
     await waitFor(() => {
       expect(bridge.createSession).toHaveBeenCalledWith(bootstrap, "gemini-cli", context);
@@ -762,7 +1220,7 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    expect(await screen.findByText("Browser ACP")).toBeInTheDocument();
+    expect(await screen.findByText("新对话")).toBeInTheDocument();
     expect(await screen.findByText("Native host is not installed.")).toBeInTheDocument();
     expect(screen.getByText("No agents detected yet.")).toBeInTheDocument();
   });
@@ -813,6 +1271,7 @@ function createBridge(overrides: Partial<BrowserAcpBridge> = {}): BrowserAcpBrid
     createSession: vi.fn().mockResolvedValue(sessions[0]),
     connectSession: vi.fn().mockImplementation(() => ({
       sendPrompt: vi.fn(),
+      resolvePermission: vi.fn(),
       close: vi.fn(),
     })),
     ...overrides,

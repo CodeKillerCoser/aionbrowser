@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { ConversationSummary, PromptEnvelope, ResolvedAgent, SessionEvent } from "@browser-acp/shared-types";
+import type {
+  ConversationSummary,
+  PermissionDecision,
+  PromptEnvelope,
+  ResolvedAgent,
+  SessionEvent,
+} from "@browser-acp/shared-types";
 import { DEFAULT_MAX_ACTIVE_RUNTIMES } from "../config/daemonConfig.js";
 import type { DebugLogger } from "../debug/logger.js";
 import { SessionStore } from "../store/sessionStore.js";
@@ -193,6 +199,16 @@ export class SessionManager {
     }
 
     await runtime.cancel();
+  }
+
+  async resolvePermission(sessionId: string, decision: PermissionDecision): Promise<void> {
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) {
+      throw new Error(`Session ${sessionId} has no active runtime for permission approval`);
+    }
+
+    this.touchRuntime(sessionId);
+    await runtime.resolvePermission(decision);
   }
 
   async dispose(): Promise<void> {
