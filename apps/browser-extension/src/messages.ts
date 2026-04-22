@@ -1,4 +1,12 @@
-import type { BrowserContextBundle, DebugLogEntry, NativeHostBootstrapResponse } from "@browser-acp/shared-types";
+import type {
+  AgentSpec,
+  AgentSpecCandidate,
+  BrowserContextBundle,
+  DebugLogEntry,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
+  NativeHostBootstrapResponse,
+} from "@browser-acp/shared-types";
 
 export interface PageContextPayload {
   url: string;
@@ -42,6 +50,25 @@ export type BackgroundRequest =
       type: "browser-acp/list-agents";
     }
   | {
+      type: "browser-acp/list-agent-specs";
+    }
+  | {
+      type: "browser-acp/list-agent-spec-candidates";
+    }
+  | {
+      type: "browser-acp/create-agent-spec";
+      input: ExternalAgentSpecInput;
+    }
+  | {
+      type: "browser-acp/update-agent-spec";
+      id: string;
+      patch: ExternalAgentSpecPatch;
+    }
+  | {
+      type: "browser-acp/delete-agent-spec";
+      id: string;
+    }
+  | {
       type: "browser-acp/list-sessions";
     }
   | {
@@ -63,6 +90,9 @@ export type BackgroundRequest =
   | {
       type: "browser-acp/claim-pending-selection-action";
     };
+
+export type AgentSpecResponse = AgentSpec;
+export type AgentSpecCandidateResponse = AgentSpecCandidate;
 
 export type BackgroundRuntimeMessage =
   | {

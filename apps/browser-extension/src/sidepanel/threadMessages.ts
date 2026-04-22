@@ -333,11 +333,11 @@ export function buildThreadMessages(events: SessionEvent[]): TranscriptItem[] {
                 reason: "error",
                 error: turn.error,
               }
-            : turn.completedAt
-              ? {
-                  type: "complete",
-                  reason: turn.stopReason ?? "unknown",
-                }
+    : turn.completedAt
+      ? {
+          type: "complete",
+          reason: turn.stopReason === "stop" ? "stop" : "unknown",
+        }
               : {
                   type: "running",
                 },

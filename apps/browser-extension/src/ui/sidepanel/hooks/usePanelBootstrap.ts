@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  AgentSpec,
   BrowserContextBundle,
   ConversationSummary,
   NativeHostBootstrapResponse,
@@ -25,6 +26,7 @@ export function usePanelBootstrap(
 ) {
   const [bootstrap, setBootstrap] = useState<NativeHostBootstrapResponse | null>(null);
   const [agents, setAgents] = useState<ResolvedAgent[]>([]);
+  const [agentSpecs, setAgentSpecs] = useState<AgentSpec[]>([]);
   const [sessions, setSessions] = useState<ConversationSummary[]>([]);
   const [context, setContext] = useState<BrowserContextBundle | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -39,8 +41,9 @@ export function usePanelBootstrap(
     void (async () => {
       try {
         const nextBootstrap = await bridge.ensureDaemon();
-        const [nextAgents, nextSessions, nextContext, nextDebugState] = await Promise.all([
+        const [nextAgents, nextAgentSpecs, nextSessions, nextContext, nextDebugState] = await Promise.all([
           bridge.listAgents(nextBootstrap),
+          bridge.listAgentSpecs(nextBootstrap),
           bridge.listSessions(nextBootstrap),
           bridge.getActiveContext(),
           bridge.getDebugState(),
@@ -52,6 +55,7 @@ export function usePanelBootstrap(
 
         setBootstrap(nextBootstrap);
         setAgents(nextAgents);
+        setAgentSpecs(nextAgentSpecs);
         setSessions(nextSessions);
         setContext((current) => keepNewerContext(current, nextContext));
         setDebugState(nextDebugState);
@@ -92,6 +96,7 @@ export function usePanelBootstrap(
   return {
     bootstrap,
     agents,
+    agentSpecs,
     sessions,
     context,
     selectedAgentId,
@@ -100,6 +105,8 @@ export function usePanelBootstrap(
     debugState,
     setContext,
     setSessions,
+    setAgents,
+    setAgentSpecs,
     setSelectedAgentId,
     setSelectedSessionId,
     setError,

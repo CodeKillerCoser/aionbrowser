@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  AgentSpec,
   BrowserContextBundle,
   ConversationSummary,
   NativeHostBootstrapResponse,
   PromptEnvelope,
   ResolvedAgent,
   SessionSocketServerMessage,
+  AgentSpecCandidate,
 } from "@browser-acp/shared-types";
 import { BrowserAcpPanel, type BrowserAcpBridge, type BrowserAcpSocket } from "../src/ui/sidepanel/BrowserAcpPanel";
 import type { BackgroundDebugState } from "../src/messages";
@@ -116,6 +118,25 @@ const debugState: BackgroundDebugState = {
   ],
 };
 
+const agentSpecs: AgentSpec[] = [
+  {
+    id: "external-custom-agent",
+    name: "Mock Agent",
+    kind: "external-acp",
+    enabled: true,
+    icon: {
+      kind: "url",
+      value: "https://example.com/mock.svg",
+    },
+    launch: {
+      command: "mock-agent",
+      args: [],
+    },
+    createdAt: "2026-04-20T01:00:00.000Z",
+    updatedAt: "2026-04-20T01:00:00.000Z",
+  },
+];
+
 describe("BrowserAcpPanel", () => {
   it("loads agents, sessions, and exposes current context from one debug panel", async () => {
     const bridge = createBridge();
@@ -190,6 +211,208 @@ describe("BrowserAcpPanel", () => {
           context,
         } satisfies Partial<PromptEnvelope>),
       );
+    });
+  });
+
+  it("renders the user prompt immediately while the session is still being created", async () => {
+    const pendingSession = createDeferred<ConversationSummary>();
+    const createSession = vi.fn().mockReturnValue(pendingSession.promise);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      createSession,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
+    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+      target: { value: "Show this instantly" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".browser-acp-thread-message-user")?.textContent).toContain("Show this instantly");
+      expect(screen.getByLabelText("Assistant loading")).toBeInTheDocument();
+    });
+    expect(createSession).toHaveBeenCalledWith(bootstrap, "mock-agent", context);
+
+    pendingSession.resolve({
+      ...sessions[0],
+      id: "session-2",
+      agentId: "mock-agent",
+      agentName: "Mock Agent",
+      title: "Instant thread",
+    });
+  });
+
+  it("focuses the composer input when the hint row is clicked", async () => {
+    const bridge = createBridge();
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    const input = screen.getByPlaceholderText("Ask the current page anything...");
+
+    fireEvent.mouseDown(screen.getByText("Enter to send · Shift+Enter for a new line"));
+
+    expect(input).toHaveFocus();
+  });
+
+  it("keeps the sent prompt visible and renders send failures as assistant replies", async () => {
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      createSession: vi.fn().mockRejectedValue(new Error("Daemon request failed: 500")),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
+    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+      target: { value: "Keep this even if send fails" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".browser-acp-thread-message-user")?.textContent).toContain(
+        "Keep this even if send fails",
+      );
+      expect(document.querySelector(".browser-acp-thread-message-assistant")?.textContent).toContain(
+        "Daemon request failed: 500",
+      );
+    });
+    expect(screen.getByPlaceholderText("Ask the current page anything...")).toHaveValue("");
+  });
+
+  it("creates an external ACP agent from the settings panel and refreshes the agent list", async () => {
+    const createdSpec: AgentSpec = {
+      id: "external-new-agent",
+      name: "New ACP Agent",
+      kind: "external-acp",
+      enabled: true,
+      icon: {
+        kind: "url",
+        value: "https://example.com/new.svg",
+      },
+      launch: {
+        command: "new-agent",
+        args: ["--acp", "--profile", "dev"],
+      },
+      createdAt: "2026-04-20T02:00:00.000Z",
+      updatedAt: "2026-04-20T02:00:00.000Z",
+    };
+    const createAgentSpec = vi.fn().mockResolvedValue(createdSpec);
+    const listAgents = vi
+      .fn()
+      .mockResolvedValueOnce(agents)
+      .mockResolvedValueOnce([
+        ...agents,
+        {
+          id: createdSpec.id,
+          name: createdSpec.name,
+          source: "user",
+          distribution: {
+            type: "custom",
+            command: "new-agent",
+            args: ["--acp", "--profile", "dev"],
+          },
+          icon: "https://example.com/new.svg",
+          status: "launchable",
+          launchCommand: "new-agent",
+          launchArgs: ["--acp", "--profile", "dev"],
+        } satisfies ResolvedAgent,
+      ]);
+    const bridge = createBridge({
+      listAgents,
+      createAgentSpec,
+      listAgentSpecs: vi.fn().mockResolvedValue(agentSpecs),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
+    expect(await screen.findByRole("button", { name: "返回对话" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Debug" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Agent name"), {
+      target: { value: "New ACP Agent" },
+    });
+    fireEvent.change(screen.getByLabelText("Launch command"), {
+      target: { value: "new-agent" },
+    });
+    fireEvent.change(screen.getByLabelText("Launch arguments"), {
+      target: { value: "--acp --profile dev" },
+    });
+    fireEvent.change(screen.getByLabelText("Icon URL"), {
+      target: { value: "https://example.com/new.svg" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save external agent" }));
+
+    await waitFor(() => {
+      expect(createAgentSpec).toHaveBeenCalledWith(bootstrap, {
+        name: "New ACP Agent",
+        launchCommand: "new-agent",
+        launchArgs: ["--acp", "--profile", "dev"],
+        icon: {
+          kind: "url",
+          value: "https://example.com/new.svg",
+        },
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "返回对话" }));
+    expect(await screen.findByRole("button", { name: "New ACP Agent launchable" })).toBeInTheDocument();
+  });
+
+  it("adds scanned builtin ACP agents from the settings panel", async () => {
+    const candidate: AgentSpecCandidate = {
+      catalogId: "gemini-cli",
+      name: "Gemini CLI",
+      description: "Google's official CLI for Gemini",
+      launchCommand: "gemini",
+      launchArgs: ["--experimental-acp"],
+      detectedCommandPath: "/shell/bin/gemini",
+      status: "ready",
+      recommended: true,
+    };
+    const createdSpec: AgentSpec = {
+      id: "external-gemini",
+      name: "Gemini CLI",
+      kind: "external-acp",
+      enabled: true,
+      launch: {
+        command: "gemini",
+        args: ["--experimental-acp"],
+      },
+      createdAt: "2026-04-20T03:00:00.000Z",
+      updatedAt: "2026-04-20T03:00:00.000Z",
+    };
+    const createAgentSpec = vi.fn().mockResolvedValue(createdSpec);
+    const bridge = createBridge({
+      listAgentSpecs: vi.fn().mockResolvedValue([]),
+      listAgentSpecCandidates: vi.fn().mockResolvedValue([candidate]),
+      createAgentSpec,
+    });
+
+    const { container } = render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
+
+    expect(await screen.findByText("检测到可添加的 Agent")).toBeInTheDocument();
+    expect(screen.getByText("gemini --experimental-acp")).toBeInTheDocument();
+    expect(screen.getByText("/shell/bin/gemini")).toBeInTheDocument();
+    expect(container.querySelector(".browser-acp-settings-candidate-row .browser-acp-settings-agent-icon img")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "添加选中的 Agent" }));
+
+    await waitFor(() => {
+      expect(createAgentSpec).toHaveBeenCalledWith(bootstrap, {
+        name: "Gemini CLI",
+        launchCommand: "gemini",
+        launchArgs: ["--experimental-acp"],
+        description: "Google's official CLI for Gemini",
+        icon: undefined,
+      });
     });
   });
 
@@ -536,15 +759,19 @@ describe("BrowserAcpPanel", () => {
     expect(
       screen.getByText(
         (_, node) =>
-          node?.classList.contains("browser-acp-system-row-summary") &&
-          (node.textContent?.includes("工具调用：read package.json") ?? false),
+          Boolean(
+            node?.classList.contains("browser-acp-system-row-summary") &&
+              (node.textContent?.includes("工具调用：read package.json") ?? false),
+          ),
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
         (_, node) =>
-          node?.classList.contains("browser-acp-system-row-summary") &&
-          (node.textContent?.includes("权限请求：read package.json") ?? false),
+          Boolean(
+            node?.classList.contains("browser-acp-system-row-summary") &&
+              (node.textContent?.includes("权限请求：read package.json") ?? false),
+          ),
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
@@ -618,8 +845,10 @@ describe("BrowserAcpPanel", () => {
 
     const toolSummary = await screen.findByText(
       (_, node) =>
-        node?.classList.contains("browser-acp-system-row-summary") &&
-        (node.textContent?.includes("工具调用：read package.json") ?? false),
+        Boolean(
+          node?.classList.contains("browser-acp-system-row-summary") &&
+            (node.textContent?.includes("工具调用：read package.json") ?? false),
+        ),
     );
     const toggle = toolSummary.closest("button");
 
@@ -633,8 +862,10 @@ describe("BrowserAcpPanel", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("输出：")).toBeInTheDocument();
     const hasToolPayload = (_: string, node: Element | null) =>
-      node?.tagName.toLowerCase() === "code" &&
-      (node.textContent?.includes('"name": "browser_acp"') ?? false);
+      Boolean(
+        node?.tagName.toLowerCase() === "code" &&
+          (node.textContent?.includes('"name": "browser_acp"') ?? false),
+      );
 
     expect(screen.getByText(hasToolPayload)).toBeInTheDocument();
   });
@@ -691,9 +922,11 @@ describe("BrowserAcpPanel", () => {
     render(<BrowserAcpPanel bridge={bridge} />);
 
     const permissionSummary = await screen.findByText(
-      (_, node) =>
-        node?.classList.contains("browser-acp-system-row-summary") &&
-        (node.textContent?.includes("权限请求：read ~/Desktop/notes.txt") ?? false),
+        (_, node) =>
+          Boolean(
+            node?.classList.contains("browser-acp-system-row-summary") &&
+              (node.textContent?.includes("权限请求：read ~/Desktop/notes.txt") ?? false),
+          ),
     );
     const toggle = permissionSummary.closest("button");
 
@@ -707,8 +940,10 @@ describe("BrowserAcpPanel", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("请求输入：")).toBeInTheDocument();
     const hasPermissionPayload = (_: string, node: Element | null) =>
-      node?.tagName.toLowerCase() === "code" &&
-      (node.textContent?.includes('"path": "~/Desktop/notes.txt"') ?? false);
+      Boolean(
+        node?.tagName.toLowerCase() === "code" &&
+          (node.textContent?.includes('"path": "~/Desktop/notes.txt"') ?? false),
+      );
 
     expect(screen.getByText(hasPermissionPayload)).toBeInTheDocument();
   });
@@ -861,7 +1096,8 @@ describe("BrowserAcpPanel", () => {
     expect(
       screen.getByTestId("session-event-log").querySelectorAll(".browser-acp-thread-message-assistant"),
     ).toHaveLength(1);
-    expect(screen.getByText("Streaming…")).toBeInTheDocument();
+    expect(screen.queryByText("Streaming…")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Assistant loading")).toBeInTheDocument();
   });
 
   it("clears the running state after a delayed turn.completed event arrives", async () => {
@@ -979,6 +1215,7 @@ describe("BrowserAcpPanel", () => {
       expect(screen.getByText("hello")).toBeInTheDocument();
       expect(screen.getByText("Hello world")).toBeInTheDocument();
       expect(screen.queryByText("Streaming…")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Assistant loading")).not.toBeInTheDocument();
     });
   });
 
@@ -1258,10 +1495,30 @@ async function openDebugPanel() {
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return {
+    promise,
+    resolve,
+    reject,
+  };
+}
+
 function createBridge(overrides: Partial<BrowserAcpBridge> = {}): BrowserAcpBridge {
   return {
     ensureDaemon: vi.fn().mockResolvedValue(bootstrap),
     listAgents: vi.fn().mockResolvedValue(agents),
+    listAgentSpecs: vi.fn().mockResolvedValue(agentSpecs),
+    listAgentSpecCandidates: vi.fn().mockResolvedValue([]),
+    createAgentSpec: vi.fn(),
+    updateAgentSpec: vi.fn(),
+    deleteAgentSpec: vi.fn(),
     listSessions: vi.fn().mockResolvedValue(sessions),
     getActiveContext: vi.fn().mockResolvedValue(context),
     subscribeToActiveContext: vi.fn().mockReturnValue(vi.fn()),

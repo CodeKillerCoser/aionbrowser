@@ -4,7 +4,18 @@ import {
   EXTENSION_STORAGE_KEYS,
   createDaemonBaseUrl,
 } from "@browser-acp/config";
-import type { BrowserContextBundle, BrowserTabPreview, NativeHostBootstrapResponse, ResolvedAgent, ConversationSummary, DebugLogEntry } from "@browser-acp/shared-types";
+import type {
+  AgentSpec,
+  AgentSpecCandidate,
+  BrowserContextBundle,
+  BrowserTabPreview,
+  ConversationSummary,
+  DebugLogEntry,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
+  NativeHostBootstrapResponse,
+  ResolvedAgent,
+} from "@browser-acp/shared-types";
 import type {
   BackgroundDebugLogEntry,
   BackgroundDebugState,
@@ -25,6 +36,7 @@ const DEBUG_LOG_LIMIT = 120;
 const contextByTabId = new Map<number, BrowserContextBundle>();
 const debugLogs: BackgroundDebugLogEntry[] = [];
 let bootstrapCache: NativeHostBootstrapResponse | null = null;
+let bootstrapRequest: Promise<NativeHostBootstrapResponse> | null = null;
 let debugLogsHydrated = false;
 let pendingSelectionAction: PendingSelectionAction | null = null;
 const pendingSelectionActionService = createPendingSelectionActionService({
@@ -54,6 +66,40 @@ const backgroundRouter = createBackgroundRouter({
   listAgents: async () => {
     const bootstrap = await ensureDaemon();
     return fetchDaemonJson<ResolvedAgent[]>(bootstrap, "/agents");
+  },
+  listAgentSpecs: async () => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentSpec[]>(bootstrap, "/agent-specs");
+  },
+  listAgentSpecCandidates: async () => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentSpecCandidate[]>(bootstrap, "/agent-spec-candidates");
+  },
+  createAgentSpec: async (input: ExternalAgentSpecInput) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentSpec>(bootstrap, "/agent-specs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+  },
+  updateAgentSpec: async (id: string, patch: ExternalAgentSpecPatch) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentSpec>(bootstrap, `/agent-specs/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteAgentSpec: async (id: string) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<{ ok: true }>(bootstrap, `/agent-specs/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
   listSessions: async () => {
     const bootstrap = await ensureDaemon();
@@ -348,26 +394,36 @@ function isPageContextPayload(value: unknown): value is PageContextPayload {
 
 async function ensureDaemon(): Promise<NativeHostBootstrapResponse> {
   if (bootstrapCache?.ok) {
-    await recordDebugLog("native-host", "using cached daemon bootstrap", {
+    await recordDebugLog("native-host", "refreshing cached daemon bootstrap", {
       port: bootstrapCache.port,
       pid: bootstrapCache.pid,
     });
-    return bootstrapCache;
   }
 
-  await recordDebugLog("native-host", "requesting daemon bootstrap", {
-    host: BROWSER_ACP_NATIVE_HOST_NAME,
-  });
-  bootstrapCache = await sendNativeMessage({
-    command: "ensureDaemon",
-  });
-  await recordDebugLog("native-host", "daemon bootstrap response received", bootstrapCache);
+  if (!bootstrapRequest) {
+    bootstrapRequest = requestDaemonBootstrap().finally(() => {
+      bootstrapRequest = null;
+    });
+  }
+
+  bootstrapCache = await bootstrapRequest;
 
   if (!bootstrapCache.ok || !bootstrapCache.port || !bootstrapCache.token) {
     throw new Error(bootstrapCache.message ?? "Failed to bootstrap daemon");
   }
 
   return bootstrapCache;
+}
+
+async function requestDaemonBootstrap(): Promise<NativeHostBootstrapResponse> {
+  await recordDebugLog("native-host", "requesting daemon bootstrap", {
+    host: BROWSER_ACP_NATIVE_HOST_NAME,
+  });
+  const bootstrap = await sendNativeMessage({
+    command: "ensureDaemon",
+  });
+  await recordDebugLog("native-host", "daemon bootstrap response received", bootstrap);
+  return bootstrap;
 }
 
 async function fetchDaemonJson<T>(

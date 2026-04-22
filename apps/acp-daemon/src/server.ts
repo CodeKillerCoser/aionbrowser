@@ -6,8 +6,17 @@ import { readPersistedDebugLogs } from "./debug/persistedLogs.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { parse } from "node:url";
-import type { BrowserContextBundle, ResolvedAgent, SessionSocketClientMessage, SessionSocketServerMessage } from "@browser-acp/shared-types";
+import type {
+  BrowserContextBundle,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
+  ResolvedAgent,
+  SessionSocketClientMessage,
+  SessionSocketServerMessage,
+} from "@browser-acp/shared-types";
 import { WebSocketServer } from "ws";
+import { scanBuiltinAgentSpecCandidates } from "./agents/builtinCandidates.js";
+import { AgentSpecStore } from "./agents/configStore.js";
 import { createDebugLogger, type DebugLogger } from "./debug/logger.js";
 import { SessionManager } from "./session/sessionManager.js";
 import { SessionStore } from "./store/sessionStore.js";
@@ -27,6 +36,7 @@ interface StartedDaemonApp {
 
 export function createDaemonApp(options: CreateDaemonAppOptions) {
   const store = new SessionStore(options.rootDir);
+  const agentSpecStore = new AgentSpecStore(options.rootDir);
   const logger = options.logger ?? createDebugLogger();
   const logPath = join(options.rootDir, DAEMON_LOG_FILE_NAME);
   const manager = new SessionManager({
@@ -67,6 +77,38 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
 
       if (method === "GET" && url.pathname === "/agents") {
         writeJson(response, 200, await options.listAgents());
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/agent-specs") {
+        writeJson(response, 200, await agentSpecStore.list());
+        return;
+      }
+
+      if (method === "GET" && url.pathname === "/agent-spec-candidates") {
+        writeJson(response, 200, await scanBuiltinAgentSpecCandidates({
+          configuredSpecs: await agentSpecStore.list(),
+          logger,
+        }));
+        return;
+      }
+
+      if (method === "POST" && url.pathname === "/agent-specs") {
+        const body = await readJsonBody(request) as unknown as ExternalAgentSpecInput;
+        writeJson(response, 200, await agentSpecStore.createExternalAgent(body));
+        return;
+      }
+
+      const agentSpecMatch = url.pathname.match(/^\/agent-specs\/([^/]+)$/);
+      if (agentSpecMatch && method === "PUT") {
+        const body = await readJsonBody(request) as unknown as ExternalAgentSpecPatch;
+        writeJson(response, 200, await agentSpecStore.updateExternalAgent(agentSpecMatch[1], body));
+        return;
+      }
+
+      if (agentSpecMatch && method === "DELETE") {
+        await agentSpecStore.delete(agentSpecMatch[1]);
+        writeJson(response, 200, { ok: true });
         return;
       }
 

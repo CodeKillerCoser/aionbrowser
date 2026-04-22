@@ -25,6 +25,7 @@ describe("ensureDaemonRunning", () => {
         port: 4317,
         token: "existing-token",
         pid: 1234,
+        daemonFingerprint: "same-build",
       }),
       "utf8",
     );
@@ -37,6 +38,7 @@ describe("ensureDaemonRunning", () => {
       startDaemon,
       pickPort: vi.fn().mockResolvedValue(4317),
       generateToken: vi.fn().mockReturnValue("new-token"),
+      getDaemonFingerprint: vi.fn().mockResolvedValue("same-build"),
     });
 
     expect(startDaemon).not.toHaveBeenCalled();
@@ -45,6 +47,42 @@ describe("ensureDaemonRunning", () => {
       port: 4317,
       token: "existing-token",
       pid: 1234,
+    });
+  });
+
+  it("starts a replacement daemon when the built daemon entry changed", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-native-host-"));
+    tempDirs.push(rootDir);
+
+    writeFileSync(
+      join(rootDir, "daemon-state.json"),
+      JSON.stringify({
+        port: 4317,
+        token: "existing-token",
+        pid: 1234,
+        daemonFingerprint: "old-build",
+      }),
+      "utf8",
+    );
+
+    const startDaemon = vi.fn().mockResolvedValue({ pid: 9876 });
+    const result = await ensureDaemonRunning({
+      rootDir,
+      defaultCwd: rootDir,
+      healthCheck: vi.fn().mockResolvedValue(true),
+      startDaemon,
+      pickPort: vi.fn().mockResolvedValue(6123),
+      generateToken: vi.fn().mockReturnValue("new-token"),
+      getDaemonFingerprint: vi.fn().mockResolvedValue("new-build"),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(startDaemon).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      port: 6123,
+      token: "new-token",
+      pid: 9876,
     });
   });
 
@@ -65,6 +103,7 @@ describe("ensureDaemonRunning", () => {
       startDaemon: vi.fn().mockResolvedValue({ pid: 9876 }),
       pickPort: vi.fn().mockResolvedValue(6123),
       generateToken: vi.fn().mockReturnValue("spawned-token"),
+      getDaemonFingerprint: vi.fn().mockResolvedValue("spawned-build"),
       sleep: vi.fn().mockResolvedValue(undefined),
     });
 

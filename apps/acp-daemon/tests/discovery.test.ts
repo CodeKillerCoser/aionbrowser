@@ -14,14 +14,15 @@ describe("scanAvailableCommands", () => {
       };
     });
 
-    const commands = await scanAvailableCommands(["gemini"], {
+    const discovery = await scanAvailableCommands(["gemini"], {
       env: {
         PATH: "/shell/bin:/usr/bin",
       },
       execFile,
     });
 
-    expect(commands).toEqual(new Set(["gemini"]));
+    expect(discovery.commands).toEqual(new Set(["gemini"]));
+    expect(discovery.commandPaths.get("gemini")).toBe("/shell/bin/gemini");
   });
 
   it("ignores commands that which cannot resolve", async () => {
@@ -29,14 +30,15 @@ describe("scanAvailableCommands", () => {
       throw new Error("not found");
     });
 
-    const commands = await scanAvailableCommands(["codex"], {
+    const discovery = await scanAvailableCommands(["codex"], {
       env: {
         PATH: "/shell/bin:/usr/bin",
       },
       execFile,
     });
 
-    expect(commands.size).toBe(0);
+    expect(discovery.commands.size).toBe(0);
+    expect(discovery.commandPaths.size).toBe(0);
   });
 
   it("can resolve commands through the configured login shell", async () => {
@@ -50,11 +52,12 @@ describe("scanAvailableCommands", () => {
       };
     });
 
-    const commands = await scanAvailableCommands(["qodercli"], {
+    const discovery = await scanAvailableCommands(["qodercli"], {
       shellPath: "/bin/zsh",
       execFile,
     });
 
-    expect(commands).toEqual(new Set(["qodercli"]));
+    expect(discovery.commands).toEqual(new Set(["qodercli"]));
+    expect(discovery.commandPaths.get("qodercli")).toBe("/Users/example/.local/bin/qodercli");
   });
 });

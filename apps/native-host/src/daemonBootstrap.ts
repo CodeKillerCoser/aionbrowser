@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, openSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:net";
@@ -20,6 +20,7 @@ interface DaemonState {
   port: number;
   token: string;
   pid: number;
+  daemonFingerprint?: string;
 }
 
 interface StartDaemonInput {
@@ -37,6 +38,7 @@ interface EnsureDaemonRunningOptions {
   startDaemon?: (input: StartDaemonInput) => Promise<{ pid: number }>;
   pickPort?: () => Promise<number>;
   generateToken?: () => string;
+  getDaemonFingerprint?: () => Promise<string>;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -56,7 +58,9 @@ export async function ensureDaemonRunning(
   const startDaemon = options.startDaemon ?? defaultStartDaemon;
   const pickPort = options.pickPort ?? pickAvailablePort;
   const generateToken = options.generateToken ?? randomUUID;
+  const getDaemonFingerprint = options.getDaemonFingerprint ?? getDaemonEntryFingerprint;
   const sleep = options.sleep ?? defaultSleep;
+  const daemonFingerprint = await getDaemonFingerprint();
 
   await logger.log("native-host", "ensure daemon requested", {
     rootDir: options.rootDir,
@@ -67,7 +71,7 @@ export async function ensureDaemonRunning(
   if (existing) {
     await logger.log("native-host", "existing daemon state found", existing);
   }
-  if (existing && (await healthCheck(existing))) {
+  if (existing && existing.daemonFingerprint === daemonFingerprint && (await healthCheck(existing))) {
     await logger.log("native-host", "existing daemon is healthy; reusing cached state", existing);
     return {
       ok: true,
@@ -76,13 +80,20 @@ export async function ensureDaemonRunning(
     };
   }
   if (existing) {
-    await logger.log("native-host", "existing daemon state is stale; starting a replacement daemon", existing);
+    const message = existing.daemonFingerprint === daemonFingerprint
+      ? "existing daemon state is stale; starting a replacement daemon"
+      : "existing daemon build fingerprint changed; starting a replacement daemon";
+    await logger.log("native-host", message, {
+      ...existing,
+      expectedDaemonFingerprint: daemonFingerprint,
+    });
   }
 
   const nextState: DaemonState = {
     port: await pickPort(),
     token: generateToken(),
     pid: 0,
+    daemonFingerprint,
   };
   await logger.log("native-host", "starting daemon process", {
     port: nextState.port,
@@ -267,6 +278,27 @@ function resolveDaemonEntry(): { command: string; args: string[] } {
     command: process.execPath,
     args: ["--import", "tsx", daemonSource],
   };
+}
+
+async function getDaemonEntryFingerprint(): Promise<string> {
+  const daemonEntry = resolveDaemonEntry();
+  const entryKey = [daemonEntry.command, ...daemonEntry.args].join("\0");
+  const executablePath = daemonEntry.args.find((arg) => arg.endsWith(".js") || arg.endsWith(".ts"));
+
+  if (!executablePath) {
+    return entryKey;
+  }
+
+  try {
+    const fileStat = await stat(executablePath);
+    return [
+      entryKey,
+      String(fileStat.size),
+      String(fileStat.mtimeMs),
+    ].join("\0");
+  } catch {
+    return entryKey;
+  }
 }
 
 async function pickAvailablePort(): Promise<number> {

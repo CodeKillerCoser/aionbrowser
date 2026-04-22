@@ -1,7 +1,11 @@
 import { EXTENSION_STORAGE_KEYS, createDaemonBaseUrl } from "@browser-acp/config";
 import type {
+  AgentSpec,
+  AgentSpecCandidate,
   BrowserContextBundle,
   ConversationSummary,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
   NativeHostBootstrapResponse,
   PermissionDecision,
   PromptEnvelope,
@@ -20,6 +24,29 @@ export function createChromeBridge(): BrowserAcpBridge {
   return {
     ensureDaemon: () => sendMessage({ type: "browser-acp/ensure-daemon" }),
     listAgents: async () => sendMessage({ type: "browser-acp/list-agents" }),
+    listAgentSpecs: async () => sendMessage<AgentSpec[]>({ type: "browser-acp/list-agent-specs" }),
+    listAgentSpecCandidates: async () =>
+      sendMessage<AgentSpecCandidate[]>({ type: "browser-acp/list-agent-spec-candidates" }),
+    createAgentSpec: async (_bootstrap: NativeHostBootstrapResponse, input: ExternalAgentSpecInput) =>
+      sendMessage<AgentSpec>({
+        type: "browser-acp/create-agent-spec",
+        input,
+      }),
+    updateAgentSpec: async (
+      _bootstrap: NativeHostBootstrapResponse,
+      id: string,
+      patch: ExternalAgentSpecPatch,
+    ) =>
+      sendMessage<AgentSpec>({
+        type: "browser-acp/update-agent-spec",
+        id,
+        patch,
+      }),
+    deleteAgentSpec: async (_bootstrap: NativeHostBootstrapResponse, id: string) =>
+      sendMessage<{ ok: true }>({
+        type: "browser-acp/delete-agent-spec",
+        id,
+      }),
     listSessions: async () => sendMessage({ type: "browser-acp/list-sessions" }),
     getActiveContext: async () => sendMessage({ type: "browser-acp/get-active-context" }),
     subscribeToActiveContext(onContext: (context: BrowserContextBundle) => void) {

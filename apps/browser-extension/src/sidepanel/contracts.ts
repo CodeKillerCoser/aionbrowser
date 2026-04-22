@@ -1,6 +1,10 @@
 import type {
+  AgentSpec,
+  AgentSpecCandidate,
   BrowserContextBundle,
   ConversationSummary,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
   NativeHostBootstrapResponse,
   PermissionDecision,
   PromptEnvelope,
@@ -18,6 +22,15 @@ export interface BrowserAcpSocket {
 export interface BrowserAcpBridge {
   ensureDaemon(): Promise<NativeHostBootstrapResponse>;
   listAgents(bootstrap: NativeHostBootstrapResponse): Promise<ResolvedAgent[]>;
+  listAgentSpecs(bootstrap: NativeHostBootstrapResponse): Promise<AgentSpec[]>;
+  listAgentSpecCandidates(bootstrap: NativeHostBootstrapResponse): Promise<AgentSpecCandidate[]>;
+  createAgentSpec(bootstrap: NativeHostBootstrapResponse, input: ExternalAgentSpecInput): Promise<AgentSpec>;
+  updateAgentSpec(
+    bootstrap: NativeHostBootstrapResponse,
+    id: string,
+    patch: ExternalAgentSpecPatch,
+  ): Promise<AgentSpec>;
+  deleteAgentSpec(bootstrap: NativeHostBootstrapResponse, id: string): Promise<{ ok: true }>;
   listSessions(bootstrap: NativeHostBootstrapResponse): Promise<ConversationSummary[]>;
   getActiveContext(): Promise<BrowserContextBundle>;
   subscribeToActiveContext(onContext: (context: BrowserContextBundle) => void): () => void;

@@ -13,6 +13,7 @@ interface BuildResolvedCatalogInput {
   registryEntries: AgentCatalogEntry[];
   userEntries: AgentCatalogEntry[];
   availableCommands: Set<string>;
+  commandPaths?: Map<string, string>;
 }
 
 const BUILTIN_REGISTRY_DEFAULTS: AgentCatalogEntry[] = [
@@ -84,6 +85,16 @@ const BUILTIN_REGISTRY_DEFAULTS: AgentCatalogEntry[] = [
   },
 ];
 
+export function getBuiltinRegistryDefaults(): AgentCatalogEntry[] {
+  return BUILTIN_REGISTRY_DEFAULTS.map((entry) => ({
+    ...entry,
+    distribution: {
+      ...entry.distribution,
+      args: entry.distribution.args ? [...entry.distribution.args] : undefined,
+    },
+  }));
+}
+
 const RESOLUTION_RULES: Record<string, ResolutionRule> = {
   "gemini-cli": {
     localCommands: ["gemini"],
@@ -117,11 +128,12 @@ export function buildResolvedCatalog({
   registryEntries,
   userEntries,
   availableCommands,
+  commandPaths = new Map(),
 }: BuildResolvedCatalogInput): ResolvedAgent[] {
   const merged = mergeCatalogEntries(registryEntries, userEntries);
 
   return [...merged.values()].map((entry) =>
-    resolveEntry(entry, availableCommands, userEntries.some((candidate) => candidate.id === entry.id)),
+    resolveEntry(entry, availableCommands, commandPaths, userEntries.some((candidate) => candidate.id === entry.id)),
   );
 }
 
@@ -179,10 +191,11 @@ function mergeCatalogEntries(
 function resolveEntry(
   entry: AgentCatalogEntry,
   availableCommands: Set<string>,
+  commandPaths: Map<string, string>,
   isUserConfigured: boolean,
 ): ResolvedAgent {
   if (isUserConfigured || entry.source === "user") {
-    return resolveUserEntry(entry, availableCommands);
+    return resolveUserEntry(entry, availableCommands, commandPaths);
   }
 
   const rule = RESOLUTION_RULES[entry.id];
@@ -197,7 +210,15 @@ function resolveEntry(
   );
 
   if (matchedLocalCommand) {
-    return finalizeResolvedEntry(entry, "ready", matchedLocalCommand, rule.localArgs);
+    return finalizeResolvedEntry(
+      entry,
+      "ready",
+      matchedLocalCommand,
+      rule.localArgs,
+      undefined,
+      undefined,
+      commandPaths.get(matchedLocalCommand),
+    );
   }
 
   const hasBaseCliOnly =
@@ -224,6 +245,7 @@ function resolveEntry(
         ? `Can be launched via npx using ${entry.distribution.packageName}.`
         : undefined,
       rule.adapterPackage,
+      commandPaths.get(entry.distribution.command),
     );
   }
 
@@ -234,10 +256,15 @@ function resolveEntry(
     entry.distribution.args ?? [],
     "No compatible local command was found and npx is unavailable.",
     rule.adapterPackage,
+    commandPaths.get(entry.distribution.command),
   );
 }
 
-function resolveUserEntry(entry: AgentCatalogEntry, availableCommands: Set<string>): ResolvedAgent {
+function resolveUserEntry(
+  entry: AgentCatalogEntry,
+  availableCommands: Set<string>,
+  commandPaths: Map<string, string>,
+): ResolvedAgent {
   const commandName = basename(entry.distribution.command);
   const isAbsolute = entry.distribution.command.startsWith("/");
   const isReady = isAbsolute || availableCommands.has(commandName);
@@ -248,6 +275,8 @@ function resolveUserEntry(entry: AgentCatalogEntry, availableCommands: Set<strin
     entry.distribution.command,
     entry.distribution.args ?? [],
     isReady ? undefined : `Custom command ${entry.distribution.command} is not available on this machine.`,
+    undefined,
+    isAbsolute ? entry.distribution.command : commandPaths.get(commandName),
   );
 }
 
@@ -258,6 +287,7 @@ function finalizeResolvedEntry(
   launchArgs: string[],
   installationHint?: string,
   adapterPackage?: string,
+  detectedCommandPath?: string,
 ): ResolvedAgent {
   return {
     ...entry,
@@ -267,5 +297,6 @@ function finalizeResolvedEntry(
     installationHint,
     adapterPackage,
     detectedCommand: status === "ready" ? launchCommand : undefined,
+    detectedCommandPath,
   };
 }

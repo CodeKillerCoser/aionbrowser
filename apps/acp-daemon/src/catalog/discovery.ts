@@ -7,6 +7,11 @@ interface ExecFileResult {
   stderr: string;
 }
 
+export interface CommandDiscoveryResult {
+  commands: Set<string>;
+  commandPaths: Map<string, string>;
+}
+
 interface ScanAvailableCommandsOptions {
   env?: NodeJS.ProcessEnv;
   shellPath?: string;
@@ -27,8 +32,9 @@ const execFile = promisify(execFileCallback);
 export async function scanAvailableCommands(
   candidateCommands: string[],
   options: ScanAvailableCommandsOptions = {},
-): Promise<Set<string>> {
+): Promise<CommandDiscoveryResult> {
   const commands = new Set<string>();
+  const commandPaths = new Map<string, string>();
   const exec = options.execFile ?? execFile;
   const env = options.env ?? process.env;
   const logger = options.logger;
@@ -51,9 +57,11 @@ export async function scanAvailableCommands(
               env,
               encoding: "utf8",
               maxBuffer: 1024 * 1024,
-            });
-        if (result.stdout.trim().length > 0) {
+        });
+        const commandPath = result.stdout.trim().split(/\r?\n/).find(Boolean);
+        if (commandPath) {
           commands.add(candidate);
+          commandPaths.set(candidate, commandPath);
         }
       } catch (error) {
         logger?.log("catalog", "command discovery candidate not found", {
@@ -68,5 +76,8 @@ export async function scanAvailableCommands(
     detected: [...commands],
   });
 
-  return commands;
+  return {
+    commands,
+    commandPaths,
+  };
 }

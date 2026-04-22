@@ -25,10 +25,91 @@ export interface AgentCatalogEntry {
 export interface ResolvedAgent extends AgentCatalogEntry {
   status: AgentStatus;
   detectedCommand?: string;
+  detectedCommandPath?: string;
   launchCommand: string;
   launchArgs: string[];
   installationHint?: string;
   adapterPackage?: string;
+}
+
+export type AgentSpecKind = "external-acp" | "builtin-forge";
+
+export type AgentIconSpec =
+  | {
+      kind: "url";
+      value: string;
+    }
+  | {
+      kind: "uploaded";
+      value: string;
+    };
+
+export interface AgentSpecBase {
+  id: string;
+  name: string;
+  kind: AgentSpecKind;
+  enabled: boolean;
+  description?: string;
+  icon?: AgentIconSpec;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalAcpAgentSpec extends AgentSpecBase {
+  kind: "external-acp";
+  launch: {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+    cwd?: string;
+  };
+}
+
+export interface ForgeAgentSpec extends AgentSpecBase {
+  kind: "builtin-forge";
+  forge: {
+    model?: string;
+    systemPromptProfile?: string;
+    toolset?: string[];
+    commandConfig?: Record<string, unknown>;
+    workspacePolicy?: Record<string, unknown>;
+    permissionPolicy?: Record<string, unknown>;
+    shellPolicy?: Record<string, unknown>;
+    filesystemPolicy?: Record<string, unknown>;
+  };
+}
+
+export type AgentSpec = ExternalAcpAgentSpec | ForgeAgentSpec;
+
+export interface ExternalAgentSpecInput {
+  name: string;
+  launchCommand: string;
+  launchArgs: string[];
+  icon?: AgentIconSpec;
+  enabled?: boolean;
+  description?: string;
+}
+
+export interface ExternalAgentSpecPatch {
+  name?: string;
+  launchCommand?: string;
+  launchArgs?: string[];
+  icon?: AgentIconSpec | null;
+  enabled?: boolean;
+  description?: string | null;
+}
+
+export interface AgentSpecCandidate {
+  catalogId: string;
+  name: string;
+  description?: string;
+  icon?: AgentIconSpec;
+  launchCommand: string;
+  launchArgs: string[];
+  detectedCommandPath?: string;
+  status: AgentStatus;
+  recommended: boolean;
+  installationHint?: string;
 }
 
 export interface BrowserTabPreview {

@@ -1,6 +1,10 @@
 import type {
+  AgentSpec,
+  AgentSpecCandidate,
   BrowserContextBundle,
   ConversationSummary,
+  ExternalAgentSpecInput,
+  ExternalAgentSpecPatch,
   NativeHostBootstrapResponse,
   ResolvedAgent,
 } from "@browser-acp/shared-types";
@@ -19,6 +23,11 @@ export interface BackgroundRouterServices {
   ): Promise<{ ok: true }>;
   ensureDaemon(): Promise<NativeHostBootstrapResponse>;
   listAgents(): Promise<ResolvedAgent[]>;
+  listAgentSpecs(): Promise<AgentSpec[]>;
+  listAgentSpecCandidates(): Promise<AgentSpecCandidate[]>;
+  createAgentSpec(input: ExternalAgentSpecInput): Promise<AgentSpec>;
+  updateAgentSpec(id: string, patch: ExternalAgentSpecPatch): Promise<AgentSpec>;
+  deleteAgentSpec(id: string): Promise<{ ok: true }>;
   listSessions(): Promise<ConversationSummary[]>;
   getActiveContext(): Promise<BrowserContextBundle>;
   getDebugState(): Promise<BackgroundDebugState>;
@@ -47,6 +56,26 @@ export function createBackgroundRouter(services: BackgroundRouterServices) {
 
       if (message.type === "browser-acp/list-agents") {
         return services.listAgents();
+      }
+
+      if (message.type === "browser-acp/list-agent-specs") {
+        return services.listAgentSpecs();
+      }
+
+      if (message.type === "browser-acp/list-agent-spec-candidates") {
+        return services.listAgentSpecCandidates();
+      }
+
+      if (message.type === "browser-acp/create-agent-spec") {
+        return services.createAgentSpec(message.input);
+      }
+
+      if (message.type === "browser-acp/update-agent-spec") {
+        return services.updateAgentSpec(message.id, message.patch);
+      }
+
+      if (message.type === "browser-acp/delete-agent-spec") {
+        return services.deleteAgentSpec(message.id);
       }
 
       if (message.type === "browser-acp/list-sessions") {

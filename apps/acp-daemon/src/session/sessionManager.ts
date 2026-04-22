@@ -8,6 +8,8 @@ import type {
 } from "@browser-acp/shared-types";
 import { DEFAULT_MAX_ACTIVE_RUNTIMES } from "../config/daemonConfig.js";
 import type { DebugLogger } from "../debug/logger.js";
+import { createRuntimeHost } from "../runtime/runtimeHost.js";
+import type { RuntimeHost } from "../runtime/types.js";
 import { SessionStore } from "../store/sessionStore.js";
 import { RuntimeSession, type RuntimeSessionCreateInput, type RuntimeSessionLike } from "./runtimeSession.js";
 
@@ -22,6 +24,7 @@ interface SessionManagerOptions {
   logger?: DebugLogger;
   resolveAgent?: (agentId: string) => Promise<ResolvedAgent | null>;
   createRuntime?: (input: RuntimeSessionCreateInput) => Promise<RuntimeSessionLike>;
+  runtimeHost?: RuntimeHost;
   maxActiveRuntimes?: number;
 }
 
@@ -283,8 +286,7 @@ export class SessionManager {
   }
 
   private async createRuntime(agent: ResolvedAgent, resumeSessionId?: string): Promise<RuntimeSessionLike> {
-    const factory = this.options.createRuntime ?? RuntimeSession.create;
-    return factory({
+    const runtimeInput: RuntimeSessionCreateInput = {
       cwd: this.options.defaultCwd,
       command: agent.launchCommand,
       args: agent.launchArgs,
@@ -293,6 +295,21 @@ export class SessionManager {
         await this.recordEvent(event);
       },
       logger: this.options.logger,
+    };
+
+    if (this.options.createRuntime) {
+      return this.options.createRuntime(runtimeInput);
+    }
+
+    const runtimeHost = this.options.runtimeHost ?? createRuntimeHost();
+    return runtimeHost.create({
+      agent,
+      cwd: this.options.defaultCwd,
+      resumeSessionId,
+      runtime: {
+        onEvent: runtimeInput.onEvent,
+        logger: runtimeInput.logger,
+      },
     });
   }
 
