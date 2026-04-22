@@ -20,6 +20,7 @@ import {
   type TranscriptItem,
   type TranscriptMessageItem,
   type TranscriptPermissionItem,
+  type TranscriptThoughtItem,
   type TranscriptToolItem,
 } from "../../sidepanel/threadMessages";
 import claudeIcon from "../../sidepanel/agent-icons/claude.svg";
@@ -891,16 +892,14 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
         <main className="browser-acp-settings-content">
           <section className="browser-acp-settings-panel" aria-label="Agent settings panel">
             <div className="browser-acp-settings-hero">
-              <p>Agent Backend</p>
               <h1>Agent 配置</h1>
-              <span>扫描本机可用的 ACP agent，确认后写入配置文件。</span>
             </div>
 
             <div className="browser-acp-settings-card browser-acp-settings-list">
               <div className="browser-acp-settings-list-header">
                 <div>
                   <h3>检测到可添加的 Agent</h3>
-                  <p>默认扫描常见 ACP 后端，图标使用内置资源兜底。</p>
+                  <p>自动识别常见后端，并展示本机启动路径。</p>
                 </div>
                 <button
                   type="button"
@@ -928,12 +927,12 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                     disabled={settingsBusy || selectedCandidateIds.size === 0}
                     onClick={() => void handleAddSelectedCandidates()}
                   >
-                    添加选中的 Agent
+                    添加选中项
                   </button>
                 </>
               ) : (
                 <p className="browser-acp-empty">
-                  {candidateScanBusy ? "正在扫描本机可用 agent..." : "没有发现新的可添加 agent。"}
+                  {candidateScanBusy ? "正在扫描本机可用 Agent..." : "没有发现新的可添加 Agent。"}
                 </p>
               )}
             </div>
@@ -941,7 +940,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
             <div className="browser-acp-settings-card">
               <div className="browser-acp-settings-section-header">
                 <h3>手动添加</h3>
-                <p>用于接入未被扫描规则覆盖的外部 ACP agent。</p>
+                <p>接入扫描规则之外的外部 ACP agent。</p>
               </div>
               <div className="browser-acp-settings-grid">
                 <label className="browser-acp-settings-field">
@@ -997,7 +996,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                   disabled={settingsBusy || !settingsName.trim() || !settingsCommand.trim()}
                   onClick={() => void handleSaveAgentSpec()}
                 >
-                  Save external agent
+                  保存 Agent
                 </button>
               </div>
             </div>
@@ -1005,7 +1004,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
             <div className="browser-acp-settings-card browser-acp-settings-list">
               <div className="browser-acp-settings-section-header">
                 <h3>已配置</h3>
-                <p>这里的配置会统一作为 ACP agent 暴露给对话层。</p>
+                <p>这些 Agent 会出现在对话侧栏中。</p>
               </div>
               {agentSpecs.length > 0 ? (
                 agentSpecs.map((spec) => (
@@ -1017,7 +1016,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                   />
                 ))
               ) : (
-                <p className="browser-acp-empty">还没有配置外部 agent。</p>
+                <p className="browser-acp-empty">还没有配置外部 Agent。</p>
               )}
             </div>
           </section>
@@ -1031,16 +1030,6 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
       <aside className={`browser-acp-sidebar${isSidebarCollapsed ? " browser-acp-sidebar-collapsed" : ""}`}>
         <section className="browser-acp-sidebar-topbar">
           {!isSidebarCollapsed ? <h2>Agents</h2> : null}
-          {!isSidebarCollapsed ? (
-            <button
-              type="button"
-              className="browser-acp-sidebar-action"
-              aria-label="Agent settings"
-              onClick={() => setShowAgentSettings((current) => !current)}
-            >
-              ⚙
-            </button>
-          ) : null}
           <button
             type="button"
             className="browser-acp-sidebar-toggle"
@@ -1091,7 +1080,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                 );
               })
             ) : (
-              <p className="browser-acp-empty">No agents detected yet.</p>
+              <p className="browser-acp-empty">还没有可用 Agent。</p>
             )}
           </div>
         </section>
@@ -1126,11 +1115,30 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                   </button>
                 ))
               ) : (
-                <p className="browser-acp-empty">No saved sessions yet.</p>
+                <p className="browser-acp-empty">暂无对话。</p>
               )}
             </div>
+            <button
+              type="button"
+              className="browser-acp-sidebar-settings-entry"
+              aria-label="Agent settings"
+              onClick={() => setShowAgentSettings(true)}
+            >
+              <span aria-hidden="true">⌘</span>
+              <span>Agent 设置</span>
+            </button>
           </section>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className="browser-acp-sidebar-settings-entry browser-acp-sidebar-settings-entry-collapsed"
+            aria-label="Agent settings"
+            title="Agent 设置"
+            onClick={() => setShowAgentSettings(true)}
+          >
+            <span aria-hidden="true">⌘</span>
+          </button>
+        )}
 
       </aside>
 
@@ -1264,8 +1272,8 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
             ) : (
               <p className="browser-acp-empty browser-acp-empty-main">
                 {selectedSessionId
-                  ? "No messages have arrived in this session yet."
-                  : "Choose an agent and send your first prompt to start a reading session."}
+                  ? "这条对话还没有消息。"
+                  : "选择一个 Agent，然后开始提问。"}
               </p>
             )}
             {hasTranscript ? <div className="browser-acp-transcript-end-spacer" aria-hidden="true" /> : null}
@@ -1277,7 +1285,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
             <textarea
               ref={composerInputRef}
               className="browser-acp-composer-input"
-              placeholder="Ask the current page anything..."
+              placeholder="询问当前页面，或直接输入任务..."
               rows={1}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -1303,7 +1311,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
               }}
             >
               <span className="browser-acp-composer-hint">
-                {hasRunningTurn ? "Assistant is responding…" : "Enter to send · Shift+Enter for a new line"}
+                {hasRunningTurn ? "正在生成回复…" : "Enter 发送 · Shift+Enter 换行"}
               </span>
               <button
                 type="button"
@@ -1311,7 +1319,7 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
                 onClick={() => void handleComposerSubmit()}
                 disabled={!draft.trim() || hasRunningTurn || !bootstrap || !context || !activeAgentId}
               >
-                <span>Send</span>
+                <span>发送</span>
                 <span className="browser-acp-composer-shortcut" aria-hidden="true">
                   ↵
                 </span>
@@ -1402,9 +1410,9 @@ function optimisticPromptToMessages(prompt: OptimisticPrompt): TranscriptMessage
   ];
 }
 
-function LoadingIndicator() {
+function LoadingIndicator({ label = "Assistant loading" }: { label?: string }) {
   return (
-    <span className="browser-acp-loading-indicator" aria-label="Assistant loading" role="status">
+    <span className="browser-acp-loading-indicator" aria-label={label} role="status">
       <span className="browser-acp-loading-dot" aria-hidden="true" />
     </span>
   );
@@ -1558,7 +1566,7 @@ function SystemEventRow({
   onResolvePermission: (item: TranscriptPermissionItem, decision: PermissionDecision) => void;
 }) {
   if (item.systemType === "thought") {
-    return null;
+    return <ThoughtEventRow item={item} />;
   }
 
   if (item.systemType === "permission") {
@@ -1576,6 +1584,72 @@ function SystemEventRow({
   }
 
   return null;
+}
+
+function ThoughtEventRow({ item }: { item: TranscriptThoughtItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const status = getThoughtStatus(item.status);
+  const showLoading = item.status === "running";
+
+  return (
+    <div
+      className={`browser-acp-system-row browser-acp-system-row-${item.systemType}`}
+      data-system-event-type={item.systemType}
+    >
+      <button
+        type="button"
+        className="browser-acp-system-row-summary-toggle browser-acp-thought-toggle"
+        aria-expanded={expanded}
+        aria-label={status.text}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <div className="browser-acp-system-row-header">
+          <div className="browser-acp-system-row-copy browser-acp-thought-summary">
+            {showLoading ? (
+              <LoadingIndicator label="Thought loading" />
+            ) : (
+              <span
+                className={`browser-acp-system-row-chevron${expanded ? " browser-acp-system-row-chevron-expanded" : ""}`}
+                aria-hidden="true"
+              >
+                ▾
+              </span>
+            )}
+            <span className={`browser-acp-thought-state browser-acp-thought-state-${status.tone}`}>{status.text}</span>
+          </div>
+        </div>
+      </button>
+      {expanded ? (
+        <div className="browser-acp-system-row-body browser-acp-thought-body">
+          <p>{item.text}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function getThoughtStatus(status: TranscriptThoughtItem["status"]): {
+  text: string;
+  tone: "neutral" | "success" | "warning" | "danger";
+} {
+  if (status === "running") {
+    return {
+      text: "思考中",
+      tone: "warning",
+    };
+  }
+
+  if (status === "failed") {
+    return {
+      text: "已失败",
+      tone: "danger",
+    };
+  }
+
+  return {
+    text: "已完成",
+    tone: "success",
+  };
 }
 
 function ToolEventRow({ item }: { item: TranscriptToolItem }) {

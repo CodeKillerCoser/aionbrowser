@@ -616,8 +616,12 @@ describe("BrowserAcpPanel", () => {
     expect(screen.getByText("Clean assistant reply")).toBeInTheDocument();
     expect(screen.queryByText(/^You$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Assistant$/)).not.toBeInTheDocument();
+    const completedThoughtToggle = screen.getByRole("button", { name: /^已完成$/ });
+    expect(completedThoughtToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("思考")).not.toBeInTheDocument();
     expect(screen.queryByText("Thinking through the answer.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /正在组织思路/ })).not.toBeInTheDocument();
+    fireEvent.click(completedThoughtToggle);
+    expect(screen.getByText("Thinking through the answer.")).toBeInTheDocument();
     expect(screen.queryByText(/assistant-turn-1/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Streaming…/)).not.toBeInTheDocument();
     expect(screen.getByTestId("session-event-log")).toHaveClass("browser-acp-transcript-scroll");
@@ -630,6 +634,52 @@ describe("BrowserAcpPanel", () => {
     expect(runtimeLogs.value).toContain("\"updateKind\": \"available_commands_update\"");
     expect(runtimeLogs.value).toContain("\"chunk\": \"Thinking through the answer.\"");
     expect(runtimeLogs.value).toContain("\"chunk\": \"Clean assistant reply\"");
+  });
+
+  it("shows a collapsed running thought row with a loading indicator", async () => {
+    const bridge = createBridge({
+      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+        onStatus?.("open", { sessionId });
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.started",
+            sessionId,
+            turnId: "turn-thinking",
+            prompt: "Think first",
+            startedAt: "2026-04-08T03:51:30.000Z",
+          },
+        } satisfies SessionSocketServerMessage);
+        onMessage({
+          type: "event",
+          event: {
+            type: "turn.delta",
+            sessionId,
+            turnId: "turn-thinking",
+            chunk: "Still considering options.",
+            role: "system",
+            updateKind: "agent_thought_chunk",
+          },
+        } satisfies SessionSocketServerMessage);
+
+        return {
+          sendPrompt: vi.fn(),
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    expect(await screen.findByText("Think first")).toBeInTheDocument();
+    const runningThoughtToggle = screen.getByRole("button", { name: /^思考中$/ });
+    expect(runningThoughtToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Thought loading")).toBeInTheDocument();
+    expect(screen.queryByText("思考")).not.toBeInTheDocument();
+    expect(screen.queryByText("Still considering options.")).not.toBeInTheDocument();
+    fireEvent.click(runningThoughtToggle);
+    expect(screen.getByText("Still considering options.")).toBeInTheDocument();
   });
 
   it("renders tool calls and permission requests as dedicated system rows", async () => {

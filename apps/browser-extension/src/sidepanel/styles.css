@@ -1210,6 +1210,12 @@ body {
   background: rgba(255, 250, 240, 0.9);
 }
 
+.browser-acp-system-row-thought {
+  border-color: transparent;
+  background: transparent;
+  padding: 2px 18px;
+}
+
 .browser-acp-system-row-header {
   display: flex;
   align-items: center;
@@ -1541,6 +1547,66 @@ body {
   color: var(--browser-acp-text);
 }
 
+.browser-acp-system-row-thought .browser-acp-system-row-summary {
+  font-size: 0.82rem;
+}
+
+.browser-acp-system-row-thought .browser-acp-system-row-summary-label {
+  color: #87909f;
+  font-weight: 600;
+}
+
+.browser-acp-system-row-thought .browser-acp-system-row-summary-title {
+  color: #6d7685;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.browser-acp-thought-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6d7685;
+}
+
+.browser-acp-thought-state {
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.browser-acp-system-row-thought .browser-acp-system-row-status {
+  gap: 5px;
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.browser-acp-system-row-thought .browser-acp-loading-indicator {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+}
+
+.browser-acp-system-row-thought .browser-acp-loading-dot {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+}
+
+.browser-acp-thought-body {
+  margin-top: 4px;
+  color: #6d7685;
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.browser-acp-thought-body p {
+  margin: 0;
+}
+
 .browser-acp-system-row-summary-separator {
   color: rgba(100, 116, 139, 0.64);
 }
@@ -1769,4 +1835,618 @@ body {
     padding-left: 12px;
     padding-right: 12px;
   }
+}
+
+/* Cascade guard: the compact Raycast skin must win over older refinement rules. */
+.browser-acp-panel-root {
+  padding: 6px;
+}
+
+.browser-acp-shell {
+  grid-template-columns: 224px minmax(0, 1fr);
+  border: 1px solid rgba(31, 35, 44, 0.07);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--browser-acp-shadow);
+}
+
+.browser-acp-shell-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+.browser-acp-sidebar {
+  gap: 14px;
+  padding: 12px 10px;
+  background: linear-gradient(180deg, rgba(249, 250, 252, 0.92) 0%, rgba(242, 244, 247, 0.88) 100%);
+}
+
+.browser-acp-sidebar-topbar h2,
+.browser-acp-section-header h2 {
+  font-size: 0.86rem;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+}
+
+.browser-acp-sidebar-action,
+.browser-acp-sidebar-toggle {
+  width: 30px;
+  height: 30px;
+}
+
+.browser-acp-agent-icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 1px 1px rgba(17, 24, 39, 0.02);
+}
+
+.browser-acp-agent-icon-button-active {
+  border-color: rgba(47, 109, 243, 0.34);
+  background: rgba(47, 109, 243, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(47, 109, 243, 0.08),
+    0 3px 10px rgba(47, 109, 243, 0.08);
+}
+
+.browser-acp-session-item {
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.browser-acp-session-item[aria-pressed="true"] {
+  background: rgba(47, 109, 243, 0.1);
+  color: #1f55d6;
+}
+
+.browser-acp-session-item-title {
+  font-size: 0.87rem;
+  line-height: 1.38;
+}
+
+.browser-acp-header {
+  min-height: 46px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.browser-acp-header h1 {
+  font-size: 0.95rem;
+  font-weight: 760;
+}
+
+.browser-acp-debug-toggle-inline {
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: rgba(31, 35, 44, 0.1);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: none;
+}
+
+.browser-acp-transcript-scroll {
+  gap: 10px;
+  padding: 10px 0 18px;
+}
+
+.browser-acp-thread-message {
+  max-width: min(780px, 80%);
+  margin-inline: 12px;
+}
+
+.browser-acp-thread-message-user {
+  max-width: min(560px, 66%);
+}
+
+.browser-acp-thread-message-body {
+  border-color: rgba(31, 35, 44, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.045);
+}
+
+.browser-acp-thread-message-user .browser-acp-thread-message-body {
+  border-color: var(--browser-acp-user-border);
+  background: var(--browser-acp-user);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.12);
+}
+
+.browser-acp-system-row {
+  margin-inline: 12px;
+  padding: 9px 12px;
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+.browser-acp-composer {
+  padding: 8px 12px 12px;
+  background: rgba(244, 246, 249, 0.92);
+  border-top: 1px solid rgba(31, 35, 44, 0.07);
+}
+
+.browser-acp-composer-surface {
+  border-radius: 15px;
+  border-color: rgba(31, 35, 44, 0.12);
+  background: rgba(255, 255, 255, 0.94);
+  padding: 9px 10px;
+}
+
+.browser-acp-composer-input {
+  min-height: 22px;
+  font-size: 0.91rem;
+  line-height: 1.5;
+}
+
+.browser-acp-composer-footer {
+  margin-top: 7px;
+  padding-top: 7px;
+  min-height: 31px;
+}
+
+.browser-acp-composer-send {
+  min-height: 31px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff756d 0%, #f05249 100%);
+}
+
+.browser-acp-settings-page {
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+
+.browser-acp-settings-content {
+  padding: 20px clamp(20px, 4vw, 48px) 36px;
+}
+
+.browser-acp-settings-panel {
+  width: min(860px, 100%);
+}
+
+.browser-acp-settings-hero {
+  margin-bottom: 10px;
+}
+
+.browser-acp-settings-hero h1 {
+  font-size: 1.08rem;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.browser-acp-settings-card {
+  margin-top: 12px;
+  border-radius: 16px;
+  padding: 14px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.browser-acp-settings-agent-row,
+.browser-acp-settings-candidate-row {
+  border-radius: 12px;
+  padding: 7px 10px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.browser-acp-settings-agent-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  background: rgba(47, 109, 243, 0.08);
+  color: #2f6df3;
+}
+
+/* Raycast compact theme overrides. Keep this block last. */
+:root,
+.browser-acp-panel-root {
+  color: #171a21;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(47, 109, 243, 0.06), transparent 24%),
+    linear-gradient(180deg, #fbfaf8 0%, #f6f7f9 42%, #f3f5f8 100%);
+  font-family:
+    "SF Pro Text",
+    "SF Pro Display",
+    "Avenir Next",
+    "Segoe UI",
+    sans-serif;
+  --browser-acp-surface: rgba(255, 255, 255, 0.72);
+  --browser-acp-surface-strong: rgba(255, 255, 255, 0.94);
+  --browser-acp-border: rgba(31, 35, 44, 0.09);
+  --browser-acp-border-strong: rgba(31, 35, 44, 0.16);
+  --browser-acp-shadow: 0 18px 42px rgba(17, 24, 39, 0.08);
+  --browser-acp-shadow-soft: 0 1px 2px rgba(17, 24, 39, 0.04);
+  --browser-acp-text: #171a21;
+  --browser-acp-text-muted: #687080;
+  --browser-acp-accent: #2f6df3;
+  --browser-acp-accent-soft: rgba(47, 109, 243, 0.1);
+  --browser-acp-user: linear-gradient(180deg, #2563eb 0%, #1f55d6 100%);
+  --browser-acp-user-border: rgba(31, 85, 214, 0.42);
+  --browser-acp-code-bg: #eef1f5;
+}
+
+.browser-acp-panel-root {
+  padding: 6px;
+}
+
+.browser-acp-shell {
+  grid-template-columns: 224px minmax(0, 1fr);
+  border: 1px solid rgba(31, 35, 44, 0.07);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--browser-acp-shadow);
+}
+
+.browser-acp-shell-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
+.browser-acp-sidebar {
+  gap: 14px;
+  padding: 12px 10px;
+  background: linear-gradient(180deg, rgba(249, 250, 252, 0.92) 0%, rgba(242, 244, 247, 0.88) 100%);
+}
+
+.browser-acp-sidebar-topbar h2,
+.browser-acp-section-header h2 {
+  font-size: 0.86rem;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+}
+
+.browser-acp-sidebar-action,
+.browser-acp-sidebar-toggle {
+  width: 30px;
+  height: 30px;
+}
+
+.browser-acp-agent-icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 1px 1px rgba(17, 24, 39, 0.02);
+}
+
+.browser-acp-agent-icon-button:hover {
+  border-color: rgba(47, 109, 243, 0.2);
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.browser-acp-agent-icon-button-active {
+  border-color: rgba(47, 109, 243, 0.34);
+  background: rgba(47, 109, 243, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(47, 109, 243, 0.08),
+    0 3px 10px rgba(47, 109, 243, 0.08);
+}
+
+.browser-acp-agent-icon-button-active .browser-acp-agent-icon-fallback {
+  color: #2f6df3;
+}
+
+.browser-acp-session-item {
+  border-radius: 8px;
+  border: 0;
+  padding: 6px 8px 6px 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.browser-acp-session-item:hover {
+  background: rgba(47, 109, 243, 0.045);
+  color: #1f55d6;
+}
+
+.browser-acp-session-item[aria-pressed="true"] {
+  background: transparent;
+  box-shadow: inset 2px 0 0 rgba(47, 109, 243, 0.86);
+  color: #1f55d6;
+}
+
+.browser-acp-session-item-title {
+  font-size: 0.87rem;
+  line-height: 1.38;
+}
+
+.browser-acp-sidebar-settings-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 10px;
+  border: 0;
+  border-top: 1px solid rgba(31, 35, 44, 0.07);
+  border-radius: 0;
+  padding: 10px 9px 0;
+  color: #687080;
+  background: transparent;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 620;
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-acp-sidebar-settings-entry:hover {
+  color: #1f55d6;
+}
+
+.browser-acp-sidebar-settings-entry-collapsed {
+  justify-content: center;
+  width: 34px;
+  min-height: 34px;
+  margin-top: auto;
+  border-top: 0;
+  border-radius: 11px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 1px rgba(17, 24, 39, 0.02);
+}
+
+.browser-acp-sidebar-settings-entry-collapsed:hover {
+  background: rgba(239, 246, 255, 0.82);
+}
+
+.browser-acp-header {
+  min-height: 46px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.browser-acp-header h1 {
+  font-size: 0.95rem;
+  font-weight: 760;
+}
+
+.browser-acp-transcript-scroll {
+  gap: 10px;
+  padding: 10px 0 18px;
+}
+
+.browser-acp-thread-message {
+  max-width: min(780px, 80%);
+  margin-inline: 12px;
+}
+
+.browser-acp-thread-message-user {
+  max-width: min(560px, 66%);
+}
+
+.browser-acp-thread-message-body {
+  border-color: rgba(31, 35, 44, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.045);
+}
+
+.browser-acp-thread-message-user .browser-acp-thread-message-body {
+  border-color: var(--browser-acp-user-border);
+  background: var(--browser-acp-user);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.12);
+}
+
+.browser-acp-system-row {
+  margin-inline: 12px;
+  padding: 9px 12px;
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+.browser-acp-composer {
+  padding: 8px 12px 12px;
+  background: rgba(244, 246, 249, 0.92);
+  border-top: 1px solid rgba(31, 35, 44, 0.07);
+}
+
+.browser-acp-composer-surface {
+  border-radius: 15px;
+  border-color: rgba(31, 35, 44, 0.12);
+  background: rgba(255, 255, 255, 0.94);
+  padding: 9px 10px;
+}
+
+.browser-acp-composer-input {
+  min-height: 22px;
+  font-size: 0.91rem;
+  line-height: 1.5;
+}
+
+.browser-acp-composer-footer {
+  margin-top: 7px;
+  padding-top: 7px;
+  min-height: 31px;
+}
+
+.browser-acp-composer-send {
+  min-height: 31px;
+  border-radius: 999px;
+}
+
+.browser-acp-settings-page {
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+
+.browser-acp-settings-nav {
+  padding: 12px 9px;
+}
+
+.browser-acp-settings-back {
+  min-height: 32px;
+  border-radius: 10px;
+  padding: 0 10px;
+  color: #1f55d6;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.browser-acp-settings-back:hover {
+  border-color: rgba(47, 109, 243, 0.22);
+  color: #1f55d6;
+  background: rgba(239, 246, 255, 0.88);
+}
+
+.browser-acp-settings-nav-item {
+  min-height: 30px;
+  border-radius: 9px;
+  padding: 0 9px;
+  font-size: 0.8rem;
+}
+
+.browser-acp-settings-nav-item:not(:disabled):hover {
+  background: rgba(47, 109, 243, 0.06);
+  color: #1f55d6;
+}
+
+.browser-acp-settings-nav-item-active {
+  background: rgba(47, 109, 243, 0.09);
+  color: #1f55d6;
+}
+
+.browser-acp-settings-content {
+  padding: 20px clamp(20px, 4vw, 48px) 36px;
+}
+
+.browser-acp-settings-panel {
+  width: min(860px, 100%);
+}
+
+.browser-acp-settings-hero {
+  margin-bottom: 10px;
+}
+
+.browser-acp-settings-hero h1 {
+  font-size: 1.08rem;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.browser-acp-settings-card {
+  margin-top: 12px;
+  border-radius: 16px;
+  padding: 14px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.browser-acp-settings-agent-row,
+.browser-acp-settings-candidate-row {
+  border-radius: 12px;
+  padding: 7px 10px;
+  border-color: rgba(31, 35, 44, 0.09);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.browser-acp-settings-candidate-row:hover {
+  border-color: rgba(47, 109, 243, 0.2);
+  background: rgba(239, 246, 255, 0.78);
+}
+
+.browser-acp-settings-agent-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  background: rgba(47, 109, 243, 0.08);
+  color: #2f6df3;
+}
+
+.browser-acp-settings-agent-copy strong {
+  font-size: 0.84rem;
+}
+
+.browser-acp-settings-agent-copy code {
+  font-size: 0.72rem;
+}
+
+/* Message visual tuning: keep AI replies as an open reading surface, with user turns as compact tech-gray bubbles. */
+:root,
+.browser-acp-panel-root {
+  --browser-acp-user: #d8dee7;
+  --browser-acp-user-border: transparent;
+}
+
+.browser-acp-thread-message-body {
+  font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.58;
+}
+
+.browser-acp-thread-message-assistant {
+  max-width: min(820px, 86%);
+  background: transparent;
+}
+
+.browser-acp-thread-message-assistant .browser-acp-thread-message-body {
+  border-color: transparent;
+  background: transparent;
+  padding: 2px 4px;
+  box-shadow: none;
+}
+
+.browser-acp-thread-message-user {
+  max-width: min(560px, 66%);
+  background: transparent;
+  border-color: transparent;
+  color: #1d2430;
+  box-shadow: none;
+}
+
+.browser-acp-thread-message-user .browser-acp-thread-message-body {
+  border: 0;
+  background: #d8dee7;
+  color: #1d2430;
+  padding: 7px 10px;
+  box-shadow: none;
+}
+
+.browser-acp-thread-message-user .browser-acp-thread-message-header strong,
+.browser-acp-thread-message-user .browser-acp-thread-message-status {
+  color: #687080;
+}
+
+.browser-acp-thread-message-user .browser-acp-inline-code {
+  background: rgba(255, 255, 255, 0.58);
+  border-color: rgba(105, 119, 138, 0.22);
+  color: #253044;
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown pre {
+  background: rgba(247, 249, 252, 0.9);
+  border-color: rgba(105, 119, 138, 0.18);
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown blockquote {
+  background: rgba(255, 255, 255, 0.48);
+  border-left-color: rgba(105, 119, 138, 0.34);
+  color: #384558;
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown table {
+  background: rgba(255, 255, 255, 0.48);
+  border-color: rgba(105, 119, 138, 0.18);
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown th,
+.browser-acp-thread-message-user .browser-acp-markdown td {
+  border-bottom-color: rgba(105, 119, 138, 0.14);
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown th {
+  color: #687080;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.browser-acp-thread-message-user .browser-acp-markdown a {
+  color: #2558d8;
+}
+
+.browser-acp-thread-message-user .browser-acp-thread-message-part-raw {
+  background: rgba(255, 255, 255, 0.52);
+  color: #253044;
 }
