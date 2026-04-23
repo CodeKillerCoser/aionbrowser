@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -238,11 +238,19 @@ describe("SessionManager ACP integration", () => {
       (entry) => entry.scope === "runtime" && entry.message === "runtime prompt content prepared",
     );
 
-    expect(promptLog?.details).toEqual(
+    const promptDetails = promptLog?.details as { browserContextPath?: string; promptText?: string } | undefined;
+
+    expect(promptDetails?.browserContextPath?.startsWith(join(rootDir, ".browser-acp", "tmp"))).toBe(true);
+    expect(existsSync(promptDetails?.browserContextPath ?? "")).toBe(true);
+    expect(readFileSync(promptDetails?.browserContextPath ?? "", "utf8")).toContain("Selected sentence");
+    expect(promptDetails).toEqual(
       expect.objectContaining({
-        promptText: buildPromptText(prompt),
+        promptText: buildPromptText(prompt, {
+          browserContextPath: promptDetails?.browserContextPath,
+        }),
       }),
     );
+    expect(promptDetails?.promptText).not.toContain("Long summary Long summary");
   });
 
   it("waits for a user permission decision before resuming the runtime", async () => {

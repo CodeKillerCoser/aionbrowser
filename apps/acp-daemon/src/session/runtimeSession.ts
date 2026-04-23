@@ -11,6 +11,7 @@ import type {
   ToolCallSnapshot,
 } from "@browser-acp/shared-types";
 import type { DebugLogger } from "../debug/logger.js";
+import { createBrowserContextFileReference } from "../runtime/browserContextFiles.js";
 import { buildPromptText } from "./prompt.js";
 
 type EventSink = (event: SessionEvent) => Promise<void>;
@@ -19,8 +20,13 @@ export interface RuntimeSessionCreateInput {
   cwd: string;
   command: string;
   args: string[];
+  env?: Record<string, string>;
   onEvent: EventSink;
   logger?: DebugLogger;
+  newSessionAdditionalDirectories?: string[];
+  newSessionMeta?: Record<string, unknown>;
+  newSessionSettings?: Record<string, unknown>;
+  promptPrefix?: string;
   resumeSessionId?: string;
 }
 
@@ -40,6 +46,8 @@ export class RuntimeSession implements RuntimeSessionLike {
     private readonly connection: acp.ClientSideConnection,
     private readonly client: RuntimeClient,
     private readonly logger: DebugLogger | undefined,
+    private readonly cwd: string,
+    private readonly promptPrefix: string | undefined,
     sessionId: string,
     private readonly agentSessionId: string,
   ) {
@@ -51,12 +59,16 @@ export class RuntimeSession implements RuntimeSessionLike {
       cwd: input.cwd,
       command: input.command,
       args: input.args,
+      envKeys: input.env ? Object.keys(input.env) : [],
       resumeSessionId: input.resumeSessionId,
     });
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: {
+        ...process.env,
+        ...input.env,
+      },
     });
     registerChildDebugLogging(child, input.logger);
 
@@ -87,6 +99,8 @@ export class RuntimeSession implements RuntimeSessionLike {
         connection,
         client,
         input.logger,
+        input.cwd,
+        input.promptPrefix,
         input.resumeSessionId ?? session.sessionId,
         session.sessionId,
       );
@@ -100,18 +114,29 @@ export class RuntimeSession implements RuntimeSessionLike {
   }
 
   async prompt(prompt: PromptEnvelope, turnId: string): Promise<acp.PromptResponse> {
-    const promptText = buildPromptText(prompt);
+    const browserContextPath = await createBrowserContextFileReference({
+      cwd: this.cwd,
+      sessionId: this.sessionId,
+      turnId,
+      context: prompt.context,
+    });
+    const promptText = buildPromptText(prompt, {
+      browserContextPath,
+      promptPrefix: this.promptPrefix,
+    });
 
     this.logger?.log("runtime", "runtime prompt dispatched", {
       sessionId: this.sessionId,
       agentSessionId: this.agentSessionId,
       turnId,
       textLength: prompt.text.length,
+      browserContextPath,
     });
     this.logger?.log("runtime", "runtime prompt content prepared", {
       sessionId: this.sessionId,
       agentSessionId: this.agentSessionId,
       turnId,
+      browserContextPath,
       promptText,
     });
     this.client.beginTurn(turnId);
@@ -496,10 +521,7 @@ async function createNewSession(
   input.logger?.log("runtime", "runtime new session started", {
     cwd: input.cwd,
   });
-  const session = await connection.newSession({
-    cwd: input.cwd,
-    mcpServers: [],
-  });
+  const session = await connection.newSession(buildSessionRequest(input));
   input.logger?.log("runtime", "runtime new session completed", {
     sessionId: session.sessionId,
   });
@@ -529,9 +551,8 @@ async function restoreSession(
       cwd: input.cwd,
     });
     const resumed = await connection.unstable_resumeSession({
+      ...buildSessionRequest(input),
       sessionId,
-      cwd: input.cwd,
-      mcpServers: [],
     });
     input.logger?.log("runtime", "runtime session resume completed", {
       sessionId: resumed.sessionId,
@@ -546,9 +567,8 @@ async function restoreSession(
       cwd: input.cwd,
     });
     const loaded = await connection.loadSession({
+      ...buildSessionRequest(input),
       sessionId,
-      cwd: input.cwd,
-      mcpServers: [],
     });
     input.logger?.log("runtime", "runtime session load completed", {
       sessionId: loaded.sessionId,
@@ -558,4 +578,19 @@ async function restoreSession(
   }
 
   throw new Error(`Agent does not support resuming session ${sessionId}`);
+}
+
+type NewSessionRequest = Parameters<acp.ClientSideConnection["newSession"]>[0];
+
+function buildSessionRequest(input: RuntimeSessionCreateInput): NewSessionRequest {
+  const request: Record<string, unknown> = {
+    _meta: input.newSessionMeta,
+    additionalDirectories: input.newSessionAdditionalDirectories,
+    cwd: input.cwd,
+    mcpServers: [],
+  };
+  if (input.newSessionSettings) {
+    request.settings = input.newSessionSettings;
+  }
+  return request as NewSessionRequest;
 }
