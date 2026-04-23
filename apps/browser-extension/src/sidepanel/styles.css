@@ -1665,6 +1665,10 @@ body {
   transform: rotate(180deg);
 }
 
+.browser-acp-thought-chevron.browser-acp-system-row-chevron-expanded {
+  transform: none;
+}
+
 .browser-acp-system-row-detail-toggle {
   display: none;
 }
@@ -2364,45 +2368,80 @@ body {
   font-size: 0.72rem;
 }
 
-/* Message visual tuning: keep AI replies as an open reading surface, with user turns as compact tech-gray bubbles. */
+/* Message visual tuning: keep the transcript close to a clean reading surface. */
 :root,
 .browser-acp-panel-root {
-  --browser-acp-user: #d8dee7;
+  --browser-acp-user: #f4f4f2;
   --browser-acp-user-border: transparent;
 }
 
+.browser-acp-transcript-scroll {
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 12px clamp(18px, 5vw, 64px) 24px;
+}
+
+.browser-acp-thread-message {
+  width: min(1120px, 100%);
+  max-width: none;
+  margin-inline: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
 .browser-acp-thread-message-body {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 400;
-  line-height: 1.58;
+  line-height: 1.72;
+  letter-spacing: 0;
 }
 
 .browser-acp-thread-message-assistant {
-  max-width: min(820px, 86%);
+  width: min(1120px, 100%);
+  max-width: none;
+  margin-inline: auto;
   background: transparent;
+  color: #202124;
 }
 
 .browser-acp-thread-message-assistant .browser-acp-thread-message-body {
-  border-color: transparent;
+  border: 0;
   background: transparent;
-  padding: 2px 4px;
+  padding: 8px 0;
   box-shadow: none;
 }
 
 .browser-acp-thread-message-user {
-  max-width: min(560px, 66%);
+  width: min(1120px, 100%);
+  max-width: none;
+  align-self: center;
+  margin-inline: auto;
   background: transparent;
   border-color: transparent;
-  color: #1d2430;
+  color: #202124;
   box-shadow: none;
 }
 
 .browser-acp-thread-message-user .browser-acp-thread-message-body {
+  align-self: flex-end;
+  width: fit-content;
+  max-width: min(560px, 100%);
   border: 0;
-  background: #d8dee7;
-  color: #1d2430;
-  padding: 7px 10px;
+  background: #f4f4f2;
+  color: #202124;
+  padding: 10px 16px;
+  border-radius: 16px;
   box-shadow: none;
+}
+
+.browser-acp-system-row-thought {
+  width: min(1120px, 100%);
+  margin-inline: auto;
+  margin-top: -2px;
+  margin-bottom: -4px;
+  padding: 0;
 }
 
 .browser-acp-thread-message-user .browser-acp-thread-message-header strong,
@@ -2411,14 +2450,14 @@ body {
 }
 
 .browser-acp-thread-message-user .browser-acp-inline-code {
-  background: rgba(255, 255, 255, 0.58);
-  border-color: rgba(105, 119, 138, 0.22);
-  color: #253044;
+  background: rgba(255, 255, 255, 0.74);
+  border-color: transparent;
+  color: #202124;
 }
 
 .browser-acp-thread-message-user .browser-acp-markdown pre {
-  background: rgba(247, 249, 252, 0.9);
-  border-color: rgba(105, 119, 138, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: transparent;
 }
 
 .browser-acp-thread-message-user .browser-acp-markdown blockquote {
@@ -2447,6 +2486,23 @@ body {
 }
 
 .browser-acp-thread-message-user .browser-acp-thread-message-part-raw {
-  background: rgba(255, 255, 255, 0.52);
-  color: #253044;
+  background: rgba(255, 255, 255, 0.72);
+  color: #202124;
+}
+
+.browser-acp-inline-code {
+  background: #f1f1ef;
+  border: 0;
+  color: #202124;
+}
+
+.browser-acp-markdown pre {
+  background: #f4f4f2;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.browser-acp-markdown pre code {
+  font-weight: 400;
 }

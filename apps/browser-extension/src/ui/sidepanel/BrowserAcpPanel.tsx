@@ -1609,10 +1609,10 @@ function ThoughtEventRow({ item }: { item: TranscriptThoughtItem }) {
               <LoadingIndicator label="Thought loading" />
             ) : (
               <span
-                className={`browser-acp-system-row-chevron${expanded ? " browser-acp-system-row-chevron-expanded" : ""}`}
+                className={`browser-acp-system-row-chevron browser-acp-thought-chevron${expanded ? " browser-acp-system-row-chevron-expanded" : ""}`}
                 aria-hidden="true"
               >
-                ▾
+                {expanded ? "▾" : "▸"}
               </span>
             )}
             <span className={`browser-acp-thought-state browser-acp-thought-state-${status.tone}`}>{status.text}</span>

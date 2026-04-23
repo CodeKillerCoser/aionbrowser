@@ -617,10 +617,13 @@ describe("BrowserAcpPanel", () => {
     expect(screen.queryByText(/^You$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Assistant$/)).not.toBeInTheDocument();
     const completedThoughtToggle = screen.getByRole("button", { name: /^已完成$/ });
+    const completedThoughtChevron = completedThoughtToggle.querySelector(".browser-acp-system-row-chevron");
     expect(completedThoughtToggle).toHaveAttribute("aria-expanded", "false");
+    expect(completedThoughtChevron).toHaveTextContent("▸");
     expect(screen.queryByText("思考")).not.toBeInTheDocument();
     expect(screen.queryByText("Thinking through the answer.")).not.toBeInTheDocument();
     fireEvent.click(completedThoughtToggle);
+    expect(completedThoughtChevron).toHaveTextContent("▾");
     expect(screen.getByText("Thinking through the answer.")).toBeInTheDocument();
     expect(screen.queryByText(/assistant-turn-1/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Streaming…/)).not.toBeInTheDocument();
