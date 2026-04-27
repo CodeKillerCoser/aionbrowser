@@ -18,31 +18,52 @@ import type {
   BackgroundRuntimeMessage,
   PendingSelectionAction,
 } from "../messages";
-import type { BrowserAcpBridge, BrowserAcpSocket } from "./contracts";
+import type { AgentConsoleHost, AgentConsoleSession } from "../host-api/agentConsoleHost";
 
-export function createChromeBridge(): BrowserAcpBridge {
+type ReadyBootstrap = NativeHostBootstrapResponse & {
+  ok: true;
+  port: number;
+  token: string;
+};
+
+export function createChromeBridge(): AgentConsoleHost {
+  let bootstrapCache: ReadyBootstrap | null = null;
+
+  async function ensureReady(): Promise<void> {
+    const bootstrap = await sendMessage<NativeHostBootstrapResponse>({
+      type: "browser-acp/ensure-daemon",
+    });
+    if (!bootstrap.ok || bootstrap.port === undefined || !bootstrap.token) {
+      throw new Error(bootstrap.message ?? "Daemon bootstrap is incomplete.");
+    }
+    bootstrapCache = bootstrap as ReadyBootstrap;
+  }
+
+  function requireBootstrap(): ReadyBootstrap {
+    if (!bootstrapCache?.ok || bootstrapCache.port === undefined || !bootstrapCache.token) {
+      throw new Error("Agent console host is not ready.");
+    }
+    return bootstrapCache;
+  }
+
   return {
-    ensureDaemon: () => sendMessage({ type: "browser-acp/ensure-daemon" }),
+    ensureReady,
     listAgents: async () => sendMessage({ type: "browser-acp/list-agents" }),
     listAgentSpecs: async () => sendMessage<AgentSpec[]>({ type: "browser-acp/list-agent-specs" }),
     listAgentSpecCandidates: async () =>
       sendMessage<AgentSpecCandidate[]>({ type: "browser-acp/list-agent-spec-candidates" }),
-    createAgentSpec: async (_bootstrap: NativeHostBootstrapResponse, input: ExternalAgentSpecInput) =>
+    createAgentSpec: async (input: ExternalAgentSpecInput) =>
       sendMessage<AgentSpec>({
         type: "browser-acp/create-agent-spec",
         input,
       }),
-    updateAgentSpec: async (
-      _bootstrap: NativeHostBootstrapResponse,
-      id: string,
-      patch: ExternalAgentSpecPatch,
-    ) =>
+    updateAgentSpec: async (id: string, patch: ExternalAgentSpecPatch) =>
       sendMessage<AgentSpec>({
         type: "browser-acp/update-agent-spec",
         id,
         patch,
       }),
-    deleteAgentSpec: async (_bootstrap: NativeHostBootstrapResponse, id: string) =>
+    deleteAgentSpec: async (id: string) =>
       sendMessage<{ ok: true }>({
         type: "browser-acp/delete-agent-spec",
         id,
@@ -93,22 +114,19 @@ export function createChromeBridge(): BrowserAcpBridge {
       };
     },
     getDebugState: async () => sendMessage<BackgroundDebugState>({ type: "browser-acp/get-debug-state" }),
-    createSession: async (_bootstrap: NativeHostBootstrapResponse, agentId: string, context: BrowserContextBundle) =>
+    createSession: async (agentId: string, context: BrowserContextBundle) =>
       sendMessage({
         type: "browser-acp/create-session",
         agentId,
         context,
       }),
     connectSession: (
-      bootstrap: NativeHostBootstrapResponse,
       sessionId: string,
       onMessage: (message: SessionSocketServerMessage) => void,
       onError: (error: string) => void,
       onStatus?: (status: "open" | "close" | "error", details?: Record<string, unknown>) => void,
-    ): BrowserAcpSocket => {
-      if (!bootstrap.ok || bootstrap.port === undefined || !bootstrap.token) {
-        throw new Error("Daemon bootstrap is incomplete.");
-      }
+    ): AgentConsoleSession => {
+      const bootstrap = requireBootstrap();
 
       const websocketUrl = new URL(`/sessions/${sessionId}`, createDaemonBaseUrl(bootstrap.port));
       websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";

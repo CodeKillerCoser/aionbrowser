@@ -58,4 +58,28 @@ describe("SessionStore", () => {
     expect(loadedSummaries).toEqual([summary]);
     expect(transcript).toEqual(events);
   });
+
+  it("serializes concurrent summary saves without dropping entries", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-store-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const summaries = Array.from({ length: 20 }, (_, index): ConversationSummary => ({
+      id: `session-${index}`,
+      agentId: "codex-cli",
+      agentName: "Codex",
+      title: `Prompt ${index}`,
+      pageTitle: "ACP Overview",
+      pageUrl: "https://agentclientprotocol.com/get-started/introduction",
+      createdAt: `2026-04-07T06:00:${String(index).padStart(2, "0")}.000Z`,
+      lastActivityAt: `2026-04-07T06:00:${String(index).padStart(2, "0")}.000Z`,
+      active: true,
+      readOnly: false,
+    }));
+
+    await Promise.all(summaries.map((summary) => store.saveSummary(summary)));
+
+    const loadedSummaries = await store.listSummaries();
+    expect(loadedSummaries.map((summary) => summary.id).sort()).toEqual(summaries.map((summary) => summary.id).sort());
+  });
 });

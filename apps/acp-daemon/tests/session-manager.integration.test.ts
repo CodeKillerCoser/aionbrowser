@@ -4,10 +4,9 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrowserContextBundle, ConversationSummary, PromptEnvelope, ResolvedAgent, SessionEvent } from "@browser-acp/shared-types";
 import { createDebugLogger } from "../src/debug/logger.js";
-import { buildPromptText } from "../src/session/prompt.js";
+import { buildPromptText, type RuntimeSessionCreateInput } from "@browser-acp/runtime-core";
 import { SessionManager } from "../src/session/sessionManager.js";
 import { SessionStore } from "../src/store/sessionStore.js";
-import type { RuntimeSessionCreateInput } from "../src/session/runtimeSession.js";
 
 const tempDirs: string[] = [];
 

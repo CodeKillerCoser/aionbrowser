@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { MarkdownMessage } from "../src/sidepanel/MarkdownMessage";
+import { MarkdownMessage } from "@browser-acp/ui-react";
 
 describe("MarkdownMessage", () => {
   it("renders markdown text with inline code, tables, and highlighted code blocks", () => {

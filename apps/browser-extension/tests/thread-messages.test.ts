@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@browser-acp/shared-types";
-import { buildThreadMessages } from "../src/sidepanel/threadMessages";
+import { buildThreadMessages } from "@browser-acp/client-core";
 
 describe("buildThreadMessages", () => {
   it("merges ACP turn deltas into a single assistant message", () => {

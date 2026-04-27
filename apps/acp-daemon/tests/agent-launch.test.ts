@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ResolvedAgent } from "@browser-acp/shared-types";
-import { prepareAgentLaunch } from "../src/runtime/agentLaunch.js";
+import { prepareAgentLaunch } from "@browser-acp/runtime-node";
 
 const tempDirs: string[] = [];
 

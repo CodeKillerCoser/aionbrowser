@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentSpecStore } from "../src/agents/configStore.js";
-import { createAgentRegistry } from "../src/agents/registry.js";
+import { createAgentRegistry } from "@browser-acp/runtime-core";
 
 const tempDirs: string[] = [];
 

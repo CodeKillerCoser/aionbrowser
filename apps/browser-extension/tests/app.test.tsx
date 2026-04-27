@@ -168,7 +168,7 @@ describe("BrowserAcpPanel", () => {
         agentName: "Mock Agent",
         title: "New thread",
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onMessage({
           type: "event",
           event: {
@@ -198,13 +198,13 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Summarize the key claim." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(bridge.createSession).toHaveBeenCalledWith(bootstrap, "mock-agent", context);
+      expect(bridge.createSession).toHaveBeenCalledWith("mock-agent", context);
       expect(sendPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           text: "Summarize the key claim.",
@@ -226,16 +226,16 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Show this instantly" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
       expect(document.querySelector(".browser-acp-thread-message-user")?.textContent).toContain("Show this instantly");
       expect(screen.getByLabelText("Assistant loading")).toBeInTheDocument();
     });
-    expect(createSession).toHaveBeenCalledWith(bootstrap, "mock-agent", context);
+    expect(createSession).toHaveBeenCalledWith("mock-agent", context);
 
     pendingSession.resolve({
       ...sessions[0],
@@ -252,9 +252,9 @@ describe("BrowserAcpPanel", () => {
     render(<BrowserAcpPanel bridge={bridge} />);
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
-    const input = screen.getByPlaceholderText("Ask the current page anything...");
+    const input = screen.getByPlaceholderText("询问当前页面，或直接输入任务...");
 
-    fireEvent.mouseDown(screen.getByText("Enter to send · Shift+Enter for a new line"));
+    fireEvent.mouseDown(screen.getByText("Enter 发送 · Shift+Enter 换行"));
 
     expect(input).toHaveFocus();
   });
@@ -269,10 +269,10 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Keep this even if send fails" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
       expect(document.querySelector(".browser-acp-thread-message-user")?.textContent).toContain(
@@ -282,7 +282,7 @@ describe("BrowserAcpPanel", () => {
         "Daemon request failed: 500",
       );
     });
-    expect(screen.getByPlaceholderText("Ask the current page anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("询问当前页面，或直接输入任务...")).toHaveValue("");
   });
 
   it("creates an external ACP agent from the settings panel and refreshes the agent list", async () => {
@@ -347,10 +347,10 @@ describe("BrowserAcpPanel", () => {
     fireEvent.change(screen.getByLabelText("Icon URL"), {
       target: { value: "https://example.com/new.svg" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save external agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存 Agent" }));
 
     await waitFor(() => {
-      expect(createAgentSpec).toHaveBeenCalledWith(bootstrap, {
+      expect(createAgentSpec).toHaveBeenCalledWith({
         name: "New ACP Agent",
         launchCommand: "new-agent",
         launchArgs: ["--acp", "--profile", "dev"],
@@ -403,10 +403,10 @@ describe("BrowserAcpPanel", () => {
     expect(screen.getByText("gemini --experimental-acp")).toBeInTheDocument();
     expect(screen.getByText("/shell/bin/gemini")).toBeInTheDocument();
     expect(container.querySelector(".browser-acp-settings-candidate-row .browser-acp-settings-agent-icon img")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "添加选中的 Agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加选中项" }));
 
     await waitFor(() => {
-      expect(createAgentSpec).toHaveBeenCalledWith(bootstrap, {
+      expect(createAgentSpec).toHaveBeenCalledWith({
         name: "Gemini CLI",
         launchCommand: "gemini",
         launchArgs: ["--experimental-acp"],
@@ -421,7 +421,7 @@ describe("BrowserAcpPanel", () => {
     let onStatus:
       | ((status: "open" | "close" | "error", details?: Record<string, unknown>) => void)
       | undefined;
-    const connectSession = vi.fn().mockImplementation((_, __, ___, ____, nextOnStatus) => {
+    const connectSession = vi.fn().mockImplementation((_sessionId, _onMessage, _onError, nextOnStatus) => {
       onStatus = nextOnStatus;
       return {
         sendPrompt,
@@ -444,10 +444,10 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Summarize the key claim." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
       expect(bridge.createSession).toHaveBeenCalled();
@@ -475,9 +475,9 @@ describe("BrowserAcpPanel", () => {
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
-    expect(await screen.findByText("No agents detected yet.")).toBeInTheDocument();
-    expect(screen.getByText("No saved sessions yet.")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask the current page anything...")).toBeInTheDocument();
+    expect(await screen.findByText("还没有可用 Agent。")).toBeInTheDocument();
+    expect(screen.getByText("暂无对话。")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("询问当前页面，或直接输入任务...")).toBeInTheDocument();
   });
 
   it("claims and sends a pending selection action after the native side panel boots", async () => {
@@ -493,7 +493,7 @@ describe("BrowserAcpPanel", () => {
           createdAt: "2026-04-09T04:00:00.000Z",
         })
         .mockResolvedValue(null),
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onMessage({
           type: "event",
           event: {
@@ -535,7 +535,7 @@ describe("BrowserAcpPanel", () => {
 
   it("renders a merged assistant message while keeping raw ACP events in the debug panel", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -641,7 +641,7 @@ describe("BrowserAcpPanel", () => {
 
   it("shows a collapsed running thought row with a loading indicator", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -687,7 +687,7 @@ describe("BrowserAcpPanel", () => {
 
   it("renders tool calls and permission requests as dedicated system rows", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -839,7 +839,7 @@ describe("BrowserAcpPanel", () => {
 
   it("keeps tool call details collapsed by default and expands them on click", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -925,7 +925,7 @@ describe("BrowserAcpPanel", () => {
 
   it("keeps permission request details collapsed by default and expands them on click", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -1004,7 +1004,7 @@ describe("BrowserAcpPanel", () => {
   it("sends a permission decision when the user approves a pending request", async () => {
     const resolvePermission = vi.fn();
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -1078,7 +1078,7 @@ describe("BrowserAcpPanel", () => {
         agentName: "Gemini CLI",
         title: "Fresh thread",
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, _onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, _onMessage, _onError, onStatus) => {
         queueMicrotask(() => {
           onStatus?.("open", { sessionId });
         });
@@ -1095,12 +1095,12 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    expect(screen.getByText("Choose an agent and send your first prompt to start a reading session.")).toBeInTheDocument();
+    expect(screen.getByText("选择一个 Agent，然后开始提问。")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Start a fresh thread" },
     });
-    fireEvent.keyDown(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.keyDown(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       key: "Enter",
       code: "Enter",
       shiftKey: false,
@@ -1110,7 +1110,7 @@ describe("BrowserAcpPanel", () => {
     });
 
     await waitFor(() => {
-      expect(bridge.createSession).toHaveBeenCalledWith(bootstrap, "gemini-cli", context);
+      expect(bridge.createSession).toHaveBeenCalledWith("gemini-cli", context);
       expect(sendPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: "session-2",
@@ -1122,7 +1122,7 @@ describe("BrowserAcpPanel", () => {
 
   it("shows only one assistant card while a turn is running", async () => {
     const bridge = createBridge({
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onStatus?.("open", { sessionId });
         onMessage({
           type: "event",
@@ -1163,7 +1163,7 @@ describe("BrowserAcpPanel", () => {
         agentName: "Gemini CLI",
         title: "Delayed complete thread",
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         setTimeout(() => {
           onStatus?.("open", { sessionId });
           onMessage({
@@ -1259,10 +1259,10 @@ describe("BrowserAcpPanel", () => {
 
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
       expect(screen.getByText("hello")).toBeInTheDocument();
@@ -1288,7 +1288,7 @@ describe("BrowserAcpPanel", () => {
         agentName: "Gemini CLI",
         title: "Fresh context thread",
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, _onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, _onMessage, _onError, onStatus) => {
         queueMicrotask(() => {
           onStatus?.("open", { sessionId });
         });
@@ -1307,13 +1307,13 @@ describe("BrowserAcpPanel", () => {
     await openDebugPanel();
     expect(screen.getByText("Important sentence")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("Ask the current page anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."), {
       target: { value: "Use the newest page context" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(bridge.createSession).toHaveBeenCalledWith(bootstrap, "gemini-cli", refreshedContext);
+      expect(bridge.createSession).toHaveBeenCalledWith("gemini-cli", refreshedContext);
       expect(sendPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           text: "Use the newest page context",
@@ -1407,7 +1407,7 @@ describe("BrowserAcpPanel", () => {
         notifySelectionAction = onReady;
         return vi.fn();
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, _onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, _onMessage, _onError, onStatus) => {
         connectCount += 1;
 
         if (connectCount === 1) {
@@ -1476,7 +1476,7 @@ describe("BrowserAcpPanel", () => {
         id: "session-selection-action",
         title: "Selection action thread",
       }),
-      connectSession: vi.fn().mockImplementation((_, sessionId, _onMessage, _onError, onStatus) => {
+      connectSession: vi.fn().mockImplementation((sessionId, _onMessage, _onError, onStatus) => {
         queueMicrotask(() => {
           onStatus?.("open", { sessionId });
         });
@@ -1493,7 +1493,7 @@ describe("BrowserAcpPanel", () => {
     await screen.findByRole("button", { name: "Gemini CLI ready" });
 
     await waitFor(() => {
-      expect(bridge.createSession).toHaveBeenCalledWith(bootstrap, "gemini-cli", context);
+      expect(bridge.createSession).toHaveBeenCalledWith("gemini-cli", context);
       expect(sendPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: "session-selection-action",
@@ -1505,14 +1505,14 @@ describe("BrowserAcpPanel", () => {
 
   it("keeps the shell visible when bootstrap fails", async () => {
     const bridge = createBridge({
-      ensureDaemon: vi.fn().mockRejectedValue(new Error("Native host is not installed.")),
+      ensureReady: vi.fn().mockRejectedValue(new Error("Native host is not installed.")),
     });
 
     render(<BrowserAcpPanel bridge={bridge} />);
 
     expect(await screen.findByText("新对话")).toBeInTheDocument();
     expect(await screen.findByText("Native host is not installed.")).toBeInTheDocument();
-    expect(screen.getByText("No agents detected yet.")).toBeInTheDocument();
+    expect(screen.getByText("还没有可用 Agent。")).toBeInTheDocument();
   });
 
   it("shows one unified debug panel for page details, selected text, and runtime logs", async () => {
@@ -1565,7 +1565,7 @@ function createDeferred<T>() {
 
 function createBridge(overrides: Partial<BrowserAcpBridge> = {}): BrowserAcpBridge {
   return {
-    ensureDaemon: vi.fn().mockResolvedValue(bootstrap),
+    ensureReady: vi.fn().mockResolvedValue(bootstrap),
     listAgents: vi.fn().mockResolvedValue(agents),
     listAgentSpecs: vi.fn().mockResolvedValue(agentSpecs),
     listAgentSpecCandidates: vi.fn().mockResolvedValue([]),

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserContextBundle, PromptEnvelope, ResolvedAgent } from "@browser-acp/shared-types";
+import { SessionManager } from "@browser-acp/runtime-core";
 import { createSessionService } from "../src/application/sessionService.js";
-import { SessionManager } from "../src/session/sessionManager.js";
 import { SessionStore } from "../src/store/sessionStore.js";
 
 const tempDirs: string[] = [];

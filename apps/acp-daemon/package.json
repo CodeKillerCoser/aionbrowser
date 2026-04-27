@@ -12,6 +12,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.1",
     "@browser-acp/config": "workspace:*",
+    "@browser-acp/runtime-core": "workspace:*",
+    "@browser-acp/runtime-node": "workspace:*",
     "@browser-acp/shared-types": "workspace:*",
     "@hono/node-server": "^1.14.0",
     "hono": "^4.7.8",

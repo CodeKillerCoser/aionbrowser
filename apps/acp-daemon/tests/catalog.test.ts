@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentCatalogEntry } from "@browser-acp/shared-types";
-import { buildResolvedCatalog } from "../src/catalog/index.js";
+import { buildResolvedCatalog } from "@browser-acp/runtime-core";
 
 const registryEntries: AgentCatalogEntry[] = [
   {

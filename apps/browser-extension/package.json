@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@assistant-ui/react": "^0.12.24",
+    "@browser-acp/client-core": "workspace:*",
     "@browser-acp/config": "workspace:*",
+    "@browser-acp/host-api": "workspace:*",
     "@browser-acp/shared-types": "workspace:*",
+    "@browser-acp/ui-react": "workspace:*",
     "highlight.js": "^11.11.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

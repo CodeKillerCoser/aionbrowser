@@ -48,6 +48,42 @@ class FakeWebSocket {
 }
 
 describe("createChromeBridge", () => {
+  it("keeps daemon bootstrap inside the Chrome host adapter when opening a session socket", async () => {
+    const socket = new FakeWebSocket("ws://127.0.0.1:9000");
+    const webSocketConstructor = vi.fn(() => socket);
+    const sendMessage = vi.fn((message, callback: (response: unknown) => void) => {
+      if (message.type === "browser-acp/ensure-daemon") {
+        callback({
+          ok: true,
+          port: 9000,
+          token: "token",
+        });
+        return;
+      }
+
+      callback({ ok: true });
+    });
+    vi.stubGlobal("WebSocket", webSocketConstructor);
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage,
+        lastError: undefined,
+      },
+    });
+
+    const host = createChromeBridge();
+    await host.ensureReady();
+    host.connectSession("session-1", vi.fn(), vi.fn());
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      {
+        type: "browser-acp/ensure-daemon",
+      },
+      expect.any(Function),
+    );
+    expect(webSocketConstructor).toHaveBeenCalledWith("ws://127.0.0.1:9000/sessions/session-1?token=token");
+  });
+
   it("claims a pending selection action through the background request bridge", async () => {
     const sendMessage = vi.fn((message, callback: (response: unknown) => void) => {
       callback({
@@ -152,12 +188,14 @@ describe("createChromeBridge", () => {
     expect(removeStorageListener).toHaveBeenCalledTimes(1);
   });
 
-  it("queues prompts until the websocket opens", () => {
+  it("queues prompts until the websocket opens", async () => {
     const socket = new FakeWebSocket("ws://127.0.0.1:9000");
     const webSocketConstructor = vi.fn(() => socket);
     vi.stubGlobal("WebSocket", webSocketConstructor);
+    stubReadyDaemon();
 
     const bridge = createChromeBridge();
+    await bridge.ensureReady();
     const prompt: PromptEnvelope = {
       sessionId: "session-1",
       agentId: "agent-1",
@@ -174,11 +212,6 @@ describe("createChromeBridge", () => {
     };
 
     const session = bridge.connectSession(
-      {
-        ok: true,
-        port: 9000,
-        token: "token",
-      },
       "session-1",
       vi.fn(),
       vi.fn(),
@@ -196,22 +229,15 @@ describe("createChromeBridge", () => {
     });
   });
 
-  it("queues permission decisions until the websocket opens", () => {
+  it("queues permission decisions until the websocket opens", async () => {
     const socket = new FakeWebSocket("ws://127.0.0.1:9000");
     const webSocketConstructor = vi.fn(() => socket);
     vi.stubGlobal("WebSocket", webSocketConstructor);
+    stubReadyDaemon();
 
     const bridge = createChromeBridge();
-    const session = bridge.connectSession(
-      {
-        ok: true,
-        port: 9000,
-        token: "token",
-      },
-      "session-1",
-      vi.fn(),
-      vi.fn(),
-    );
+    await bridge.ensureReady();
+    const session = bridge.connectSession("session-1", vi.fn(), vi.fn());
 
     session.resolvePermission({
       permissionId: "permission-1",
@@ -233,3 +259,23 @@ describe("createChromeBridge", () => {
     });
   });
 });
+
+function stubReadyDaemon(): void {
+  vi.stubGlobal("chrome", {
+    runtime: {
+      sendMessage: vi.fn((message, callback: (response: unknown) => void) => {
+        if (message.type === "browser-acp/ensure-daemon") {
+          callback({
+            ok: true,
+            port: 9000,
+            token: "token",
+          });
+          return;
+        }
+
+        callback({ ok: true });
+      }),
+      lastError: undefined,
+    },
+  });
+}

@@ -3,28 +3,17 @@ import type {
   AgentSpec,
   BrowserContextBundle,
   ConversationSummary,
-  NativeHostBootstrapResponse,
   ResolvedAgent,
 } from "@browser-acp/shared-types";
+import { getErrorMessage, keepNewerContext } from "@browser-acp/client-core";
 import type { BackgroundDebugState } from "../../../messages";
-import type { BrowserAcpBridge } from "../../../sidepanel/contracts";
-
-function keepNewerContext(
-  current: BrowserContextBundle | null,
-  next: BrowserContextBundle,
-): BrowserContextBundle {
-  if (!current) {
-    return next;
-  }
-
-  return Date.parse(next.capturedAt) >= Date.parse(current.capturedAt) ? next : current;
-}
+import type { BrowserAcpBridge } from "../../../host-api/agentConsoleHost";
 
 export function usePanelBootstrap(
   bridge: BrowserAcpBridge,
   recordPanelLog: (message: string, details?: unknown, scope?: string) => void,
 ) {
-  const [bootstrap, setBootstrap] = useState<NativeHostBootstrapResponse | null>(null);
+  const [hostReady, setHostReady] = useState(false);
   const [agents, setAgents] = useState<ResolvedAgent[]>([]);
   const [agentSpecs, setAgentSpecs] = useState<AgentSpec[]>([]);
   const [sessions, setSessions] = useState<ConversationSummary[]>([]);
@@ -40,11 +29,11 @@ export function usePanelBootstrap(
 
     void (async () => {
       try {
-        const nextBootstrap = await bridge.ensureDaemon();
+        await bridge.ensureReady();
         const [nextAgents, nextAgentSpecs, nextSessions, nextContext, nextDebugState] = await Promise.all([
-          bridge.listAgents(nextBootstrap),
-          bridge.listAgentSpecs(nextBootstrap),
-          bridge.listSessions(nextBootstrap),
+          bridge.listAgents(),
+          bridge.listAgentSpecs(),
+          bridge.listSessions(),
           bridge.getActiveContext(),
           bridge.getDebugState(),
         ]);
@@ -53,7 +42,7 @@ export function usePanelBootstrap(
           return;
         }
 
-        setBootstrap(nextBootstrap);
+        setHostReady(true);
         setAgents(nextAgents);
         setAgentSpecs(nextAgentSpecs);
         setSessions(nextSessions);
@@ -72,7 +61,7 @@ export function usePanelBootstrap(
           sessionCount: nextSessions.length,
         });
       } catch (loadError) {
-        const message = loadError instanceof Error ? loadError.message : String(loadError);
+        const message = getErrorMessage(loadError);
         setError(message);
         recordPanelLog("panel bootstrap failed", {
           error: message,
@@ -94,7 +83,7 @@ export function usePanelBootstrap(
   }, [bridge]);
 
   return {
-    bootstrap,
+    hostReady,
     agents,
     agentSpecs,
     sessions,

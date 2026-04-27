@@ -8,8 +8,23 @@
       "@browser-acp/config": [
         "packages/config/src/index.ts"
       ],
+      "@browser-acp/client-core": [
+        "packages/client-core/src/index.ts"
+      ],
+      "@browser-acp/host-api": [
+        "packages/host-api/src/index.ts"
+      ],
+      "@browser-acp/runtime-core": [
+        "packages/runtime-core/src/index.ts"
+      ],
+      "@browser-acp/runtime-node": [
+        "packages/runtime-node/src/index.ts"
+      ],
       "@browser-acp/shared-types": [
         "packages/shared-types/src/index.ts"
+      ],
+      "@browser-acp/ui-react": [
+        "packages/ui-react/src/index.ts"
       ]
     },
     "strict": true,

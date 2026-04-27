@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrowserContextBundle, PromptEnvelope } from "@browser-acp/shared-types";
-import { createBrowserContextFileReference } from "../src/runtime/browserContextFiles.js";
-import { buildPromptText } from "../src/session/prompt.js";
+import { buildPromptText } from "@browser-acp/runtime-core";
+import { createBrowserContextFileReference } from "@browser-acp/runtime-node";
 
 const tempDirs: string[] = [];
 
