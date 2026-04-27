@@ -1,10 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "rootDir": "src",
     "outDir": "dist",
     "paths": {
       "@browser-acp/runtime-core": [
-        "packages/runtime-core/src/index.ts"
+        "packages/runtime-core/dist/index.d.ts"
       ],
       "@browser-acp/shared-types": [
         "packages/shared-types/dist/index.d.ts"

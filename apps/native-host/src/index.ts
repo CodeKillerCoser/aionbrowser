@@ -6,19 +6,28 @@ import { appendRootDebugLog } from "./debugLog.js";
 
 const rootDir = getDefaultRootDir();
 
-for await (const request of readNativeMessages()) {
-  await appendRootDebugLog(rootDir, "native-host", "native host request received", {
-    command: request.command,
+void main().catch(async (error: unknown) => {
+  await appendRootDebugLog(rootDir, "native-host", "native host failed", {
+    error: error instanceof Error ? error.message : String(error),
   });
-  const response = await handleRequest(request);
-  await appendRootDebugLog(rootDir, "native-host", "native host response ready", {
-    command: request.command,
-    ok: response.ok,
-    port: response.port,
-    pid: response.pid,
-    message: response.message,
-  });
-  writeNativeMessage(response);
+  process.exitCode = 1;
+});
+
+async function main(): Promise<void> {
+  for await (const request of readNativeMessages()) {
+    await appendRootDebugLog(rootDir, "native-host", "native host request received", {
+      command: request.command,
+    });
+    const response = await handleRequest(request);
+    await appendRootDebugLog(rootDir, "native-host", "native host response ready", {
+      command: request.command,
+      ok: response.ok,
+      port: response.port,
+      pid: response.pid,
+      message: response.message,
+    });
+    writeNativeMessage(response);
+  }
 }
 
 async function handleRequest(
