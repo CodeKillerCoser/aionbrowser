@@ -8,14 +8,18 @@ import type {
   AgentSpec,
   AgentSpecCandidate,
   BrowserContextBundle,
+  BrowserContextTimelineEntry,
   BrowserTabPreview,
   ConversationSummary,
   DebugLogEntry,
   ExternalAgentSpecInput,
   ExternalAgentSpecPatch,
+  ModelState,
   NativeHostBootstrapResponse,
+  PageTaskTemplate,
   ResolvedAgent,
 } from "@browser-acp/shared-types";
+import { sanitizePageTaskTemplates } from "@browser-acp/client-core";
 import type {
   BackgroundDebugLogEntry,
   BackgroundDebugState,
@@ -32,12 +36,15 @@ import { capturePageContextInPage } from "./pageCapture";
 import { createPendingSelectionActionService } from "./session/pendingSelectionActionService";
 
 const DEBUG_LOG_LIMIT = 120;
+const CONTEXT_HISTORY_LIMIT = 60;
 
 const contextByTabId = new Map<number, BrowserContextBundle>();
+const contextHistory: BrowserContextTimelineEntry[] = [];
 const debugLogs: BackgroundDebugLogEntry[] = [];
 let bootstrapCache: NativeHostBootstrapResponse | null = null;
 let bootstrapRequest: Promise<NativeHostBootstrapResponse> | null = null;
 let debugLogsHydrated = false;
+let contextHistoryHydrated = false;
 let pendingSelectionAction: PendingSelectionAction | null = null;
 const pendingSelectionActionService = createPendingSelectionActionService({
   getCurrentAction: () => pendingSelectionAction,
@@ -48,6 +55,14 @@ const pendingSelectionActionService = createPendingSelectionActionService({
   persist: persistPendingSelectionAction,
   load: loadPendingSelectionAction,
   clear: clearPendingSelectionAction,
+  getActiveContext: async (selectionText) => {
+    const context = await getActiveContext({ refresh: true });
+    return {
+      ...context,
+      selectionText,
+    };
+  },
+  listPageTaskTemplates,
   notifyReady: () =>
     notifyRuntime({
       type: "browser-acp/selection-action-ready",
@@ -107,6 +122,9 @@ const backgroundRouter = createBackgroundRouter({
   },
   getActiveContext: () => getActiveContext({ refresh: true }),
   getDebugState,
+  listPageTaskTemplates,
+  updatePageTaskTemplates,
+  listContextHistory,
   createSession: async (agentId, context) => {
     const bootstrap = await ensureDaemon();
     return fetchDaemonJson<ConversationSummary>(bootstrap, "/sessions", {
@@ -117,6 +135,44 @@ const backgroundRouter = createBackgroundRouter({
       body: JSON.stringify({
         agentId,
         context,
+      }),
+    });
+  },
+  renameSession: async (sessionId, title) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ConversationSummary>(bootstrap, `/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title,
+      }),
+    });
+  },
+  deleteSession: async (sessionId) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<{ ok: true }>(bootstrap, `/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
+  },
+  getAgentModels: async (agentId) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ModelState | null>(bootstrap, `/agents/${encodeURIComponent(agentId)}/model`);
+  },
+  getSessionModels: async (sessionId) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ModelState | null>(bootstrap, `/sessions/${encodeURIComponent(sessionId)}/model`);
+  },
+  setSessionModel: async (sessionId, modelId) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<ModelState | null>(bootstrap, `/sessions/${encodeURIComponent(sessionId)}/model`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        modelId,
       }),
     });
   },
@@ -221,7 +277,7 @@ async function updateContextFromPage(
   return { ok: true };
 }
 
-async function getActiveContext(options: { refresh?: boolean } = {}): Promise<BrowserContextBundle> {
+async function getActiveContext(options: { refresh?: boolean; record?: boolean } = {}): Promise<BrowserContextBundle> {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const openTabsPreview = await listOpenTabs();
   const tabId = activeTab?.id ?? -1;
@@ -251,6 +307,9 @@ async function getActiveContext(options: { refresh?: boolean } = {}): Promise<Br
     summaryLength: context.summaryMarkdown.length,
     source: snapshot ? "active-tab-snapshot" : existing ? "cache" : "tab",
   });
+  if (options.record !== false) {
+    await recordContextHistory("active-context-requested", context);
+  }
   return context;
 }
 
@@ -322,6 +381,7 @@ async function isActiveTab(tabId: number): Promise<boolean> {
 async function publishActiveContextUpdate(reason: string, expectedTabId?: number): Promise<void> {
   const context = await getActiveContext({
     refresh: reason === "page-context-update",
+    record: false,
   });
   if (expectedTabId !== undefined && context.tabId !== expectedTabId) {
     return;
@@ -345,6 +405,7 @@ async function publishActiveContextUpdate(reason: string, expectedTabId?: number
     url: context.url,
     selectionLength: context.selectionText.length,
   });
+  await recordContextHistory(reason, context);
 }
 
 async function openNativeSidePanel(windowId?: number): Promise<void> {
@@ -529,7 +590,71 @@ async function getDebugState(): Promise<BackgroundDebugState> {
     daemonStatus,
     daemonLogs,
     logs: [...debugLogs],
+    contextHistory: await listContextHistory(),
   };
+}
+
+async function listPageTaskTemplates(): Promise<PageTaskTemplate[]> {
+  try {
+    const stored = await chrome.storage.local.get(EXTENSION_STORAGE_KEYS.pageTaskTemplates);
+    return sanitizePageTaskTemplates(stored[EXTENSION_STORAGE_KEYS.pageTaskTemplates]);
+  } catch {
+    return sanitizePageTaskTemplates(null);
+  }
+}
+
+async function updatePageTaskTemplates(templates: PageTaskTemplate[]): Promise<{ ok: true }> {
+  const sanitized = sanitizePageTaskTemplates(templates);
+  await chrome.storage.local.set({
+    [EXTENSION_STORAGE_KEYS.pageTaskTemplates]: sanitized,
+  });
+  await notifyRuntime({
+    type: "browser-acp/page-task-templates-changed",
+    templates: sanitized,
+  });
+  return { ok: true };
+}
+
+async function hydrateContextHistory(): Promise<void> {
+  if (contextHistoryHydrated) {
+    return;
+  }
+
+  contextHistoryHydrated = true;
+  try {
+    const stored = await chrome.storage.local.get(EXTENSION_STORAGE_KEYS.contextHistory);
+    const persistedHistory = stored[EXTENSION_STORAGE_KEYS.contextHistory];
+    if (Array.isArray(persistedHistory)) {
+      contextHistory.splice(0, contextHistory.length, ...persistedHistory.filter(isContextTimelineEntry).slice(-CONTEXT_HISTORY_LIMIT));
+    }
+  } catch {
+    // Ignore storage hydration failures.
+  }
+}
+
+async function listContextHistory(): Promise<BrowserContextTimelineEntry[]> {
+  await hydrateContextHistory();
+  return [...contextHistory];
+}
+
+async function recordContextHistory(reason: string, context: BrowserContextBundle): Promise<void> {
+  await hydrateContextHistory();
+  contextHistory.push({
+    id: crypto.randomUUID(),
+    reason,
+    capturedAt: new Date().toISOString(),
+    context,
+  });
+  if (contextHistory.length > CONTEXT_HISTORY_LIMIT) {
+    contextHistory.splice(0, contextHistory.length - CONTEXT_HISTORY_LIMIT);
+  }
+  try {
+    await chrome.storage.local.set({
+      [EXTENSION_STORAGE_KEYS.contextHistory]: contextHistory,
+    });
+  } catch {
+    // Ignore storage persistence failures.
+  }
 }
 
 async function hydrateDebugLogs(): Promise<void> {
@@ -638,13 +763,46 @@ function isPendingSelectionAction(value: unknown): value is PendingSelectionActi
     typeof value === "object" &&
     "id" in value &&
     typeof value.id === "string" &&
-    "action" in value &&
-    (value.action === "explain" || value.action === "search" || value.action === "examples") &&
+    "templateId" in value &&
+    typeof value.templateId === "string" &&
+    "templateTitle" in value &&
+    typeof value.templateTitle === "string" &&
     "selectionText" in value &&
     typeof value.selectionText === "string" &&
     "promptText" in value &&
     typeof value.promptText === "string" &&
     "createdAt" in value &&
     typeof value.createdAt === "string"
+  );
+}
+
+function isContextTimelineEntry(value: unknown): value is BrowserContextTimelineEntry {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.reason === "string" &&
+    typeof record.capturedAt === "string" &&
+    isBrowserContextBundle(record.context)
+  );
+}
+
+function isBrowserContextBundle(value: unknown): value is BrowserContextBundle {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.tabId === "number" &&
+    typeof record.url === "string" &&
+    typeof record.title === "string" &&
+    typeof record.selectionText === "string" &&
+    typeof record.summaryMarkdown === "string" &&
+    Array.isArray(record.openTabsPreview) &&
+    typeof record.capturedAt === "string"
   );
 }

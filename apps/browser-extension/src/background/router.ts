@@ -2,10 +2,13 @@ import type {
   AgentSpec,
   AgentSpecCandidate,
   BrowserContextBundle,
+  BrowserContextTimelineEntry,
   ConversationSummary,
   ExternalAgentSpecInput,
   ExternalAgentSpecPatch,
+  ModelState,
   NativeHostBootstrapResponse,
+  PageTaskTemplate,
   ResolvedAgent,
 } from "@browser-acp/shared-types";
 import type {
@@ -31,10 +34,18 @@ export interface BackgroundRouterServices {
   listSessions(): Promise<ConversationSummary[]>;
   getActiveContext(): Promise<BrowserContextBundle>;
   getDebugState(): Promise<BackgroundDebugState>;
+  listPageTaskTemplates(): Promise<PageTaskTemplate[]>;
+  updatePageTaskTemplates(templates: PageTaskTemplate[]): Promise<{ ok: true }>;
+  listContextHistory(): Promise<BrowserContextTimelineEntry[]>;
   createSession(
     agentId: string,
     context: BrowserContextBundle,
   ): Promise<ConversationSummary>;
+  renameSession(sessionId: string, title: string): Promise<ConversationSummary>;
+  deleteSession(sessionId: string): Promise<{ ok: true }>;
+  getAgentModels(agentId: string): Promise<ModelState | null>;
+  getSessionModels(sessionId: string): Promise<ModelState | null>;
+  setSessionModel(sessionId: string, modelId: string): Promise<ModelState | null>;
   queueSelectionAction(
     action: SelectionActionType,
     selectionText: string,
@@ -90,12 +101,44 @@ export function createBackgroundRouter(services: BackgroundRouterServices) {
         return services.getDebugState();
       }
 
+      if (message.type === "browser-acp/list-page-task-templates") {
+        return services.listPageTaskTemplates();
+      }
+
+      if (message.type === "browser-acp/update-page-task-templates") {
+        return services.updatePageTaskTemplates(message.templates);
+      }
+
+      if (message.type === "browser-acp/list-context-history") {
+        return services.listContextHistory();
+      }
+
       if (message.type === "browser-acp/create-session") {
         return services.createSession(message.agentId, message.context);
       }
 
+      if (message.type === "browser-acp/rename-session") {
+        return services.renameSession(message.sessionId, message.title);
+      }
+
+      if (message.type === "browser-acp/delete-session") {
+        return services.deleteSession(message.sessionId);
+      }
+
+      if (message.type === "browser-acp/get-agent-models") {
+        return services.getAgentModels(message.agentId);
+      }
+
+      if (message.type === "browser-acp/get-session-models") {
+        return services.getSessionModels(message.sessionId);
+      }
+
+      if (message.type === "browser-acp/set-session-model") {
+        return services.setSessionModel(message.sessionId, message.modelId);
+      }
+
       if (message.type === "browser-acp/trigger-selection-action") {
-        return services.queueSelectionAction(message.action, message.selectionText, {
+        return services.queueSelectionAction(message.templateId ?? message.action ?? "explain", message.selectionText, {
           tabId: sender.tab?.id,
           windowId: sender.tab?.windowId,
         });

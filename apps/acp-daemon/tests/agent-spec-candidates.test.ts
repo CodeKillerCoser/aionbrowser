@@ -4,10 +4,11 @@ import { buildBuiltinAgentSpecCandidates } from "../src/agents/builtinCandidates
 describe("buildBuiltinAgentSpecCandidates", () => {
   it("converts discovered builtin ACP agents into external agent spec inputs", () => {
     const candidates = buildBuiltinAgentSpecCandidates({
-      availableCommands: new Set(["gemini", "qodercli", "npx"]),
+      availableCommands: new Set(["gemini", "qodercli", "copilot", "npx"]),
       commandPaths: new Map([
         ["gemini", "/shell/bin/gemini"],
         ["qodercli", "/Users/example/.local/bin/qodercli"],
+        ["copilot", "/opt/homebrew/bin/copilot"],
         ["npx", "/usr/local/bin/npx"],
       ]),
       configuredSpecs: [],
@@ -34,10 +35,10 @@ describe("buildBuiltinAgentSpecCandidates", () => {
         }),
         expect.objectContaining({
           catalogId: "github-copilot-cli",
-          launchCommand: "npx",
-          launchArgs: ["@github/copilot", "--acp"],
-          detectedCommandPath: "/usr/local/bin/npx",
-          status: "launchable",
+          launchCommand: "copilot",
+          launchArgs: ["--acp", "--stdio"],
+          detectedCommandPath: "/opt/homebrew/bin/copilot",
+          status: "ready",
           recommended: true,
         }),
       ]),

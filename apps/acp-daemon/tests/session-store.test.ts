@@ -82,4 +82,77 @@ describe("SessionStore", () => {
     const loadedSummaries = await store.listSummaries();
     expect(loadedSummaries.map((summary) => summary.id).sort()).toEqual(summaries.map((summary) => summary.id).sort());
   });
+
+  it("deletes a summary and its transcript", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-store-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const summary: ConversationSummary = {
+      id: "session-delete",
+      agentId: "codex-cli",
+      agentName: "Codex",
+      title: "Delete this chat",
+      pageTitle: "Extensions",
+      pageUrl: "chrome://extensions/",
+      createdAt: "2026-04-27T09:12:35.073Z",
+      lastActivityAt: "2026-04-27T09:12:35.073Z",
+      active: false,
+      readOnly: false,
+    };
+
+    await store.saveSummary(summary);
+    await store.appendEvent(summary.id, {
+      type: "session.started",
+      sessionId: summary.id,
+      summary,
+    });
+    await store.deleteSummary(summary.id);
+
+    expect(await store.listSummaries()).toEqual([]);
+    expect(await store.readTranscript(summary.id)).toEqual([]);
+  });
+
+  it("does not read legacy model state back from persisted summaries or transcript events", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-store-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const legacySummary = {
+      id: "session-with-models",
+      agentId: "codex-cli",
+      agentName: "Codex",
+      title: "Legacy chat",
+      pageTitle: "Extensions",
+      pageUrl: "chrome://extensions/",
+      createdAt: "2026-04-27T09:12:35.073Z",
+      lastActivityAt: "2026-04-27T09:12:35.073Z",
+      active: false,
+      readOnly: false,
+      models: {
+        currentModelId: "gpt-5.5/high",
+        availableModels: [
+          {
+            modelId: "gpt-5.5/high",
+            name: "GPT-5.5 (high)",
+          },
+        ],
+      },
+    };
+
+    await store.saveSummary(legacySummary as ConversationSummary);
+    await store.appendEvent(legacySummary.id, {
+      type: "session.started",
+      sessionId: legacySummary.id,
+      summary: legacySummary,
+    } as SessionEvent);
+
+    const loadedSummary = (await store.listSummaries())[0] as ConversationSummary & { models?: unknown };
+    const loadedEvent = (await store.readTranscript(legacySummary.id))[0] as Extract<SessionEvent, { type: "session.started" }> & {
+      summary: ConversationSummary & { models?: unknown };
+    };
+
+    expect(loadedSummary.models).toBeUndefined();
+    expect(loadedEvent.summary.models).toBeUndefined();
+  });
 });

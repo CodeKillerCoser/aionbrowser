@@ -36,10 +36,9 @@ const BUILTIN_REGISTRY_DEFAULTS: AgentCatalogEntry[] = [
     description: "GitHub's AI pair programmer",
     source: "registry",
     distribution: {
-      type: "npx",
-      command: "npx",
-      args: ["@github/copilot", "--acp"],
-      packageName: "@github/copilot",
+      type: "custom",
+      command: "copilot",
+      args: ["--acp", "--stdio"],
     },
     repository: "https://github.com/github/copilot-cli",
   },
@@ -101,7 +100,7 @@ const RESOLUTION_RULES: Record<string, ResolutionRule> = {
   },
   "github-copilot-cli": {
     localCommands: ["github-copilot", "copilot"],
-    localArgs: ["--acp"],
+    localArgs: ["--acp", "--stdio"],
   },
   "qoder-cli": {
     localCommands: ["qodercli"],

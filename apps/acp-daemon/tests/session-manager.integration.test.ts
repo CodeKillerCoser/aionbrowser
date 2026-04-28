@@ -368,6 +368,12 @@ describe("SessionManager ACP integration", () => {
 
         return {
           sessionId: "concurrent-runtime-session",
+          getModelState() {
+            return null;
+          },
+          async setModel() {
+            return null;
+          },
           async prompt(prompt, turnId) {
             const firstChunk = input.onEvent({
               type: "turn.delta",

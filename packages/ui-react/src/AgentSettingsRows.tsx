@@ -1,4 +1,4 @@
-import type { AgentSpec, AgentSpecCandidate } from "@browser-acp/shared-types";
+import type { AgentSpec, AgentSpecCandidate, PageTaskTemplate } from "@browser-acp/shared-types";
 
 export function ConfiguredAgentSpecRow({
   spec,
@@ -83,6 +83,58 @@ export function AgentSpecCandidateRow({
         {candidate.installationHint ? <small>{candidate.installationHint}</small> : null}
       </span>
     </label>
+  );
+}
+
+export function PageTaskTemplateRow({
+  template,
+  disabled,
+  onChange,
+  onDelete,
+}: {
+  template: PageTaskTemplate;
+  disabled: boolean;
+  onChange: (templateId: string, patch: Partial<PageTaskTemplate>) => void;
+  onDelete: (templateId: string) => void;
+}) {
+  return (
+    <div className="browser-acp-settings-template-row">
+      <div className="browser-acp-settings-template-main">
+        <label className="browser-acp-settings-template-toggle">
+          <input
+            type="checkbox"
+            checked={template.enabled}
+            disabled={disabled}
+            onChange={(event) => onChange(template.id, { enabled: event.target.checked })}
+          />
+          <span>在菜单中显示</span>
+        </label>
+        <label className="browser-acp-settings-field browser-acp-settings-template-title">
+          <span>菜单标题</span>
+          <input
+            value={template.title}
+            disabled={disabled}
+            onChange={(event) => onChange(template.id, { title: event.target.value })}
+          />
+        </label>
+        <button
+          type="button"
+          className="browser-acp-secondary-button browser-acp-settings-template-delete"
+          disabled={disabled}
+          onClick={() => onDelete(template.id)}
+        >
+          删除
+        </button>
+      </div>
+      <label className="browser-acp-settings-field browser-acp-settings-template-prompt">
+        <span>发送给 AI 的内容</span>
+        <textarea
+          value={template.promptTemplate}
+          disabled={disabled}
+          onChange={(event) => onChange(template.id, { promptTemplate: event.target.value })}
+        />
+      </label>
+    </div>
   );
 }
 

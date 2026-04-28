@@ -82,6 +82,22 @@ describe("createDaemonApp", () => {
     const summary = (await created.json()) as { id: string };
     expect(summary.id).toBeTruthy();
 
+    const renamed = await fetch(`${baseUrl}/sessions/${summary.id}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: "Bearer test-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: "Renamed session",
+      }),
+    });
+
+    expect(renamed.status).toBe(200);
+    expect((await renamed.json()) as { title: string }).toEqual(
+      expect.objectContaining({ title: "Renamed session" }),
+    );
+
     const wsEvents = await new Promise<SessionSocketServerMessage[]>((resolvePromise, reject) => {
       const socket = new WebSocket(`ws://127.0.0.1:${server.port}/sessions/${summary.id}?token=test-token`);
       const messages: SessionSocketServerMessage[] = [];
@@ -140,8 +156,6 @@ describe("createDaemonApp", () => {
       },
     });
 
-    await app.stop();
-
     expect(wsEvents.some((message) => message.type === "event" && message.event?.type === "turn.delta")).toBe(true);
     expect((await listedSessions.json()) as Array<{ id: string }>).toEqual(
       expect.arrayContaining([
@@ -156,5 +170,28 @@ describe("createDaemonApp", () => {
         expect.objectContaining({ message: "prompt request completed" }),
       ]),
     );
+
+    const deleted = await fetch(`${baseUrl}/sessions/${summary.id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: "Bearer test-token",
+      },
+    });
+
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+
+    const listedAfterDelete = await fetch(`${baseUrl}/sessions`, {
+      headers: {
+        Authorization: "Bearer test-token",
+      },
+    });
+    expect((await listedAfterDelete.json()) as Array<{ id: string }>).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: summary.id }),
+      ]),
+    );
+
+    await app.stop();
   }, 10000);
 });

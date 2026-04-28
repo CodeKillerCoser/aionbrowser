@@ -131,9 +131,30 @@ describe("buildDaemonEnvironment", () => {
       },
     );
 
-    expect(merged.PATH).toBe("/Users/example/.npm-global/bin:/opt/homebrew/bin");
+    expect(merged.PATH?.split(":").slice(0, 2)).toEqual(["/Users/example/.npm-global/bin", "/opt/homebrew/bin"]);
     expect(merged.SHELL).toBe("/bin/zsh");
     expect(merged.HOME).toBe("/Users/example");
+  });
+
+  it("keeps common user binary directories available to spawned daemons", () => {
+    const merged = buildDaemonEnvironment(
+      {
+        PATH: "/usr/bin:/bin",
+        HOME: "/Users/example",
+      },
+      {
+        PATH: "/opt/homebrew/bin:/usr/local/bin",
+      },
+    );
+
+    expect(merged.PATH?.split(":")).toEqual(
+      expect.arrayContaining([
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/Users/example/.npm-global/bin",
+        "/Users/example/.local/bin",
+      ]),
+    );
   });
 });
 

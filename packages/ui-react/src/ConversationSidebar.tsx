@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ConversationSummary, ResolvedAgent } from "@browser-acp/shared-types";
 
 export function ConversationSidebar({
@@ -12,6 +13,8 @@ export function ConversationSidebar({
   onSelectAgent,
   onSelectSession,
   onStartNewSession,
+  onRenameSession,
+  onDeleteSession,
   onToggleCollapsed,
 }: {
   agents: ResolvedAgent[];
@@ -25,8 +28,75 @@ export function ConversationSidebar({
   onSelectAgent: (agent: ResolvedAgent) => void;
   onSelectSession: (session: ConversationSummary) => void;
   onStartNewSession: () => void;
+  onRenameSession: (session: ConversationSummary, title: string) => Promise<void> | void;
+  onDeleteSession: (session: ConversationSummary) => Promise<void> | void;
   onToggleCollapsed: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [sessionMenu, setSessionMenu] = useState<{
+    session: ConversationSummary;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renamingSession, setRenamingSession] = useState<ConversationSummary | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  useEffect(() => {
+    if (!sessionMenu) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setSessionMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSessionMenu(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [sessionMenu]);
+
+  async function submitRename() {
+    if (!renamingSession || isRenaming) {
+      return;
+    }
+
+    const nextTitle = renameDraft.trim();
+    if (!nextTitle) {
+      return;
+    }
+
+    setIsRenaming(true);
+    try {
+      await onRenameSession(renamingSession, nextTitle);
+      setRenamingSession(null);
+      setRenameDraft("");
+    } finally {
+      setIsRenaming(false);
+    }
+  }
+
+  async function deleteSession(session: ConversationSummary) {
+    setSessionMenu(null);
+    if (!window.confirm(`删除对话「${session.title}」？`)) {
+      return;
+    }
+
+    await onDeleteSession(session);
+  }
+
   return (
     <aside className={`browser-acp-sidebar${collapsed ? " browser-acp-sidebar-collapsed" : ""}`}>
       <section className="browser-acp-sidebar-topbar">
@@ -92,6 +162,14 @@ export function ConversationSidebar({
                   type="button"
                   className="browser-acp-session-item"
                   aria-pressed={selectedSessionId === session.id}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setSessionMenu({
+                      session,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
                   onClick={() => onSelectSession(session)}
                 >
                   <span className="browser-acp-session-item-title">{session.title}</span>
@@ -122,6 +200,84 @@ export function ConversationSidebar({
           <span aria-hidden="true">⌘</span>
         </button>
       )}
+
+      {sessionMenu ? (
+        <div
+          ref={menuRef}
+          className="browser-acp-session-context-menu"
+          role="menu"
+          aria-label="对话操作"
+          style={{ left: sessionMenu.x, top: sessionMenu.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setRenamingSession(sessionMenu.session);
+              setRenameDraft(sessionMenu.session.title);
+              setSessionMenu(null);
+            }}
+          >
+            重命名
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="browser-acp-session-context-menu-danger"
+            onClick={() => void deleteSession(sessionMenu.session)}
+          >
+            删除
+          </button>
+        </div>
+      ) : null}
+
+      {renamingSession ? (
+        <div className="browser-acp-session-rename-backdrop" role="presentation">
+          <form
+            className="browser-acp-session-rename-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="重命名对话"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitRename();
+            }}
+          >
+            <label htmlFor="browser-acp-session-rename-input">对话名称</label>
+            <input
+              id="browser-acp-session-rename-input"
+              value={renameDraft}
+              autoFocus
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setRenamingSession(null);
+                  setRenameDraft("");
+                }
+              }}
+            />
+            <div className="browser-acp-session-rename-actions">
+              <button
+                type="button"
+                className="browser-acp-secondary-button"
+                onClick={() => {
+                  setRenamingSession(null);
+                  setRenameDraft("");
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="browser-acp-primary-button"
+                disabled={isRenaming || renameDraft.trim().length === 0}
+              >
+                保存名称
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </aside>
   );
 }

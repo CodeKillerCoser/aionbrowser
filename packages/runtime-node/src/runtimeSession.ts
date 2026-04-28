@@ -6,6 +6,7 @@ import type {
   PermissionDecision,
   PermissionOptionSummary,
   PromptEnvelope,
+  ModelState,
   ToolCallContentSummary,
   ToolCallSnapshot,
 } from "@browser-acp/shared-types";
@@ -29,6 +30,7 @@ export class RuntimeSession implements RuntimeSessionLike {
     private readonly promptPrefix: string | undefined,
     sessionId: string,
     private readonly agentSessionId: string,
+    private modelState: ModelState | null,
   ) {
     this.sessionId = sessionId;
   }
@@ -61,16 +63,31 @@ export class RuntimeSession implements RuntimeSessionLike {
     const connection = new acp.ClientSideConnection(() => client, stream);
 
     try {
-      input.logger?.log("runtime", "runtime connection initialize started");
-      const initializeResponse = await connection.initialize({
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {},
-      });
-      input.logger?.log("runtime", "runtime connection initialize completed");
+      const session = await withStartupTimeout(
+        (async () => {
+          input.logger?.log("runtime", "runtime connection initialize started");
+          const initializeResponse = await connection.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {},
+          });
+          input.logger?.log("runtime", "runtime connection initialize completed", {
+            authMethodCount: initializeResponse.authMethods?.length ?? 0,
+          });
 
-      const session = input.resumeSessionId
-        ? await restoreSession(connection, initializeResponse.agentCapabilities, input)
-        : await createNewSession(connection, input);
+          return input.resumeSessionId
+            ? await restoreSession(connection, initializeResponse.agentCapabilities, initializeResponse.authMethods, input)
+            : await createNewSession(connection, initializeResponse.authMethods, input);
+        })(),
+        input.startupTimeoutMs,
+        () => {
+          input.logger?.log("runtime", "runtime session startup timed out", {
+            timeoutMs: input.startupTimeoutMs,
+          });
+          if (!child.killed) {
+            child.kill();
+          }
+        },
+      );
       client.setBrowserSessionId(input.resumeSessionId ?? session.sessionId);
 
       return new RuntimeSession(
@@ -82,6 +99,7 @@ export class RuntimeSession implements RuntimeSessionLike {
         input.promptPrefix,
         input.resumeSessionId ?? session.sessionId,
         session.sessionId,
+        normalizeModelState(session.models),
       );
     } catch (error) {
       input.logger?.log("runtime", "runtime session startup failed", error);
@@ -90,6 +108,42 @@ export class RuntimeSession implements RuntimeSessionLike {
       }
       throw error;
     }
+  }
+
+  getModelState(): ModelState | null {
+    return this.modelState;
+  }
+
+  async setModel(modelId: string): Promise<ModelState | null> {
+    this.logger?.log("runtime", "runtime set session model requested", {
+      sessionId: this.sessionId,
+      agentSessionId: this.agentSessionId,
+      modelId,
+    });
+    const response = await this.connection.unstable_setSessionModel({
+      sessionId: this.agentSessionId,
+      modelId,
+    });
+    const responseModels = normalizeModelState(
+      (response as { models?: unknown } | undefined)?.models,
+    );
+
+    if (responseModels) {
+      this.modelState = responseModels;
+    } else if (this.modelState) {
+      this.modelState = {
+        ...this.modelState,
+        currentModelId: modelId,
+      };
+    }
+
+    this.logger?.log("runtime", "runtime set session model completed", {
+      sessionId: this.sessionId,
+      agentSessionId: this.agentSessionId,
+      modelId: this.modelState?.currentModelId ?? modelId,
+    });
+
+    return this.modelState;
   }
 
   async prompt(prompt: PromptEnvelope, turnId: string): Promise<acp.PromptResponse> {
@@ -495,14 +549,22 @@ function registerChildDebugLogging(
 
 async function createNewSession(
   connection: acp.ClientSideConnection,
+  authMethods: AcpAuthMethod[] | undefined,
   input: RuntimeSessionCreateInput,
-): Promise<{ sessionId: string }> {
+): Promise<AcpSessionResponse> {
   input.logger?.log("runtime", "runtime new session started", {
     cwd: input.cwd,
   });
-  const session = await connection.newSession(buildSessionRequest(input));
+  const session = await runWithAuthentication(
+    () => connection.newSession(buildSessionRequest(input)),
+    connection,
+    authMethods,
+    input,
+    "new session",
+  );
   input.logger?.log("runtime", "runtime new session completed", {
     sessionId: session.sessionId,
+    modelCount: normalizeModelState(session.models)?.availableModels.length ?? 0,
   });
 
   return session;
@@ -518,8 +580,9 @@ async function restoreSession(
         };
       }
     | undefined,
+  authMethods: AcpAuthMethod[] | undefined,
   input: RuntimeSessionCreateInput,
-): Promise<{ sessionId: string }> {
+): Promise<AcpSessionResponse> {
   const sessionId = input.resumeSessionId!;
   const supportsResume = Boolean(capabilities?.sessionCapabilities?.resume);
   const supportsLoad = Boolean(capabilities?.loadSession);
@@ -529,12 +592,19 @@ async function restoreSession(
       sessionId,
       cwd: input.cwd,
     });
-    const resumed = await connection.unstable_resumeSession({
-      ...buildSessionRequest(input),
-      sessionId,
-    });
+    const resumed = await runWithAuthentication(
+      () => connection.unstable_resumeSession({
+        ...buildSessionRequest(input),
+        sessionId,
+      }),
+      connection,
+      authMethods,
+      input,
+      "session resume",
+    );
     input.logger?.log("runtime", "runtime session resume completed", {
       sessionId: resumed.sessionId,
+      modelCount: normalizeModelState(resumed.models)?.availableModels.length ?? 0,
     });
 
     return resumed;
@@ -545,12 +615,19 @@ async function restoreSession(
       sessionId,
       cwd: input.cwd,
     });
-    const loaded = await connection.loadSession({
-      ...buildSessionRequest(input),
-      sessionId,
-    });
+    const loaded = await runWithAuthentication(
+      () => connection.loadSession({
+        ...buildSessionRequest(input),
+        sessionId,
+      }),
+      connection,
+      authMethods,
+      input,
+      "session load",
+    );
     input.logger?.log("runtime", "runtime session load completed", {
       sessionId: loaded.sessionId,
+      modelCount: normalizeModelState(loaded.models)?.availableModels.length ?? 0,
     });
 
     return loaded;
@@ -560,6 +637,134 @@ async function restoreSession(
 }
 
 type NewSessionRequest = Parameters<acp.ClientSideConnection["newSession"]>[0];
+type AcpAuthMethod = NonNullable<Awaited<ReturnType<acp.ClientSideConnection["initialize"]>>["authMethods"]>[number];
+type AcpSessionResponse = {
+  sessionId: string;
+  models?: unknown;
+};
+
+async function runWithAuthentication<T extends AcpSessionResponse>(
+  operation: () => Promise<T>,
+  connection: acp.ClientSideConnection,
+  authMethods: AcpAuthMethod[] | undefined,
+  input: RuntimeSessionCreateInput,
+  label: string,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isAuthenticationRequired(error)) {
+      throw error;
+    }
+
+    const method = authMethods?.[0];
+    if (!method) {
+      throw error;
+    }
+
+    if (input.allowAuthentication === false) {
+      input.logger?.log("runtime", "runtime authentication skipped", {
+        label,
+      });
+      throw error;
+    }
+
+    input.logger?.log("runtime", "runtime authentication requested", {
+      label,
+      methodId: method.id,
+      methodName: "name" in method ? method.name : undefined,
+    });
+    await connection.authenticate({
+      methodId: method.id,
+    });
+    input.logger?.log("runtime", "runtime authentication completed", {
+      label,
+      methodId: method.id,
+    });
+    return operation();
+  }
+}
+
+function isAuthenticationRequired(error: unknown): boolean {
+  if (error instanceof acp.RequestError && error.code === -32000) {
+    return true;
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    code?: unknown;
+    message?: unknown;
+  };
+  return candidate.code === -32000 || candidate.message === "Authentication required";
+}
+
+function withStartupTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number | undefined,
+  onTimeout: () => void,
+): Promise<T> {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise;
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      onTimeout();
+      reject(new Error(`Runtime startup timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+function normalizeModelState(value: unknown): ModelState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as {
+    currentModelId?: unknown;
+    availableModels?: unknown;
+  };
+  if (typeof candidate.currentModelId !== "string" || !Array.isArray(candidate.availableModels)) {
+    return null;
+  }
+
+  const availableModels = candidate.availableModels
+    .map((model): ModelState["availableModels"][number] | null => {
+      if (!model || typeof model !== "object") {
+        return null;
+      }
+      const entry = model as {
+        modelId?: unknown;
+        name?: unknown;
+        description?: unknown;
+      };
+      if (typeof entry.modelId !== "string" || typeof entry.name !== "string") {
+        return null;
+      }
+      return {
+        modelId: entry.modelId,
+        name: entry.name,
+        description: typeof entry.description === "string" ? entry.description : null,
+      };
+    })
+    .filter((model): model is ModelState["availableModels"][number] => model !== null);
+
+  return {
+    currentModelId: candidate.currentModelId,
+    availableModels,
+  };
+}
 
 function buildSessionRequest(input: RuntimeSessionCreateInput): NewSessionRequest {
   const request: Record<string, unknown> = {

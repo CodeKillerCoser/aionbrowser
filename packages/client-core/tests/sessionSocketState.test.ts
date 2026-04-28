@@ -10,6 +10,8 @@ import {
 describe("session socket state helpers", () => {
   it("detects unavailable sockets", () => {
     expect(isSessionSocketUnavailable(false, "open")).toBe(true);
+    expect(isSessionSocketUnavailable(true, "idle")).toBe(true);
+    expect(isSessionSocketUnavailable(true, "connecting")).toBe(true);
     expect(isSessionSocketUnavailable(true, "closed")).toBe(true);
     expect(isSessionSocketUnavailable(true, "error")).toBe(true);
     expect(isSessionSocketUnavailable(true, "open")).toBe(false);

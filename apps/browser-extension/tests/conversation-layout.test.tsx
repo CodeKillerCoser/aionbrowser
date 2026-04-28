@@ -89,6 +89,8 @@ describe("conversation layout", () => {
         onSelectAgent={onSelectAgent}
         onSelectSession={onSelectSession}
         onStartNewSession={onStartNewSession}
+        onRenameSession={vi.fn()}
+        onDeleteSession={vi.fn()}
         onToggleCollapsed={onToggleCollapsed}
       />,
     );

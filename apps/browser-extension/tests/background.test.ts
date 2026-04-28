@@ -255,7 +255,14 @@ describe("background behaviors", () => {
       });
       expect(triggerResponse).toHaveBeenCalledWith({ ok: true });
     });
-    expect(sidePanelOpen.mock.invocationCallOrder[0]).toBeLessThan(storageSet.mock.invocationCallOrder[0]);
+    const pendingActionStorageCall = storageSet.mock.calls.findIndex((call) => {
+      const payload = call[0] as Record<string, unknown>;
+      return "browser-acp-pending-selection-action" in payload;
+    });
+    expect(pendingActionStorageCall).toBeGreaterThanOrEqual(0);
+    expect(sidePanelOpen.mock.invocationCallOrder[0]).toBeLessThan(
+      storageSet.mock.invocationCallOrder[pendingActionStorageCall],
+    );
 
     const firstClaimResponse = vi.fn();
     runtimeMessageListener?.(

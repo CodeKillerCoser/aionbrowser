@@ -118,17 +118,56 @@ export class AgentSpecStore {
       if (!Array.isArray(parsed)) {
         throw new Error("Agent spec config must be a JSON array");
       }
-      return parsed as AgentSpec[];
+      const normalized = this.normalizeLoadedSpecs(parsed as AgentSpec[]);
+      if (normalized.changed) {
+        await this.save(normalized.specs);
+      }
+      return normalized.specs;
     } catch (error) {
       const repaired = tryParseJsonArrayPrefix(raw);
       if (!repaired) {
         throw error;
       }
 
-      await this.save(repaired);
-      return repaired;
+      const normalized = this.normalizeLoadedSpecs(repaired);
+      await this.save(normalized.specs);
+      return normalized.specs;
     }
   }
+
+  private normalizeLoadedSpecs(specs: AgentSpec[]): { specs: AgentSpec[]; changed: boolean } {
+    let changed = false;
+    const normalized = specs.map((spec) => {
+      if (spec.kind !== "external-acp" || !isObsoleteGitHubCopilotLaunch(spec)) {
+        return spec;
+      }
+
+      changed = true;
+      return {
+        ...spec,
+        launch: {
+          command: "copilot",
+          args: ["--acp", "--stdio"],
+        },
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    return {
+      specs: normalized,
+      changed,
+    };
+  }
+}
+
+function isObsoleteGitHubCopilotLaunch(spec: ExternalAcpAgentSpec): boolean {
+  return (
+    /github\s+copilot|copilot/i.test(spec.name) &&
+    spec.launch.command === "npx" &&
+    spec.launch.args.length === 2 &&
+    spec.launch.args[0] === "@github/copilot" &&
+    spec.launch.args[1] === "--acp"
+  );
 }
 
 function tryParseJsonArrayPrefix(raw: string): AgentSpec[] | null {

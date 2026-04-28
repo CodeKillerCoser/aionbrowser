@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BrowserContextBundle, PromptEnvelope, ResolvedAgent } from "@browser-acp/shared-types";
+import type { BrowserContextBundle, ModelState, PromptEnvelope, ResolvedAgent } from "@browser-acp/shared-types";
 import { SessionManager } from "@browser-acp/runtime-core";
 import { createSessionService } from "../src/application/sessionService.js";
 import { SessionStore } from "../src/store/sessionStore.js";
@@ -63,6 +63,8 @@ describe("SessionManager runtime lifecycle", () => {
 
     const runtimeOne = {
       sessionId: "session-1",
+      getModelState: vi.fn().mockReturnValue(null),
+      setModel: vi.fn().mockResolvedValue(null),
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
       resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -70,6 +72,8 @@ describe("SessionManager runtime lifecycle", () => {
     };
     const runtimeTwo = {
       sessionId: "session-2",
+      getModelState: vi.fn().mockReturnValue(null),
+      setModel: vi.fn().mockResolvedValue(null),
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
       resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +81,8 @@ describe("SessionManager runtime lifecycle", () => {
     };
     const resumedRuntimeOne = {
       sessionId: "session-1",
+      getModelState: vi.fn().mockReturnValue(null),
+      setModel: vi.fn().mockResolvedValue(null),
       prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
       resolvePermission: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -151,4 +157,210 @@ describe("SessionManager runtime lifecycle", () => {
       ]),
     );
   });
+
+  it("loads agent models with non-interactive startup limits", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "mock-agent",
+      name: "Mock Agent",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "mock-agent",
+      },
+      status: "ready",
+      launchCommand: "mock-agent",
+      launchArgs: ["--acp"],
+    };
+    const models: ModelState = {
+      currentModelId: "fast",
+      availableModels: [
+        {
+          modelId: "fast",
+          name: "Fast",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "model-probe-session",
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const createRuntime = vi.fn().mockResolvedValue(runtime);
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      modelProbeTimeoutMs: 1234,
+      createRuntime,
+    });
+
+    await expect(manager.getAgentModels(agent)).resolves.toEqual(models);
+
+    expect(createRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "mock-agent",
+        resumeSessionId: undefined,
+        allowAuthentication: false,
+        startupTimeoutMs: 1234,
+      }),
+    );
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("shares an in-flight agent model probe for concurrent requests", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "mock-agent",
+      name: "Mock Agent",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "mock-agent",
+      },
+      status: "ready",
+      launchCommand: "mock-agent",
+      launchArgs: ["--acp"],
+    };
+    const models: ModelState = {
+      currentModelId: "fast",
+      availableModels: [
+        {
+          modelId: "fast",
+          name: "Fast",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "model-probe-session",
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    let resolveRuntime!: (value: typeof runtime) => void;
+    const runtimePromise = new Promise<typeof runtime>((resolve) => {
+      resolveRuntime = resolve;
+    });
+    const createRuntime = vi.fn().mockReturnValue(runtimePromise);
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      createRuntime,
+    });
+
+    const firstRequest = manager.getAgentModels(agent);
+    const secondRequest = manager.getAgentModels(agent);
+
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+    resolveRuntime(runtime);
+    await expect(Promise.all([firstRequest, secondRequest])).resolves.toEqual([models, models]);
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("returns probed agent models even when probe runtime disposal hangs", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "mock-agent",
+      name: "Mock Agent",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "mock-agent",
+      },
+      status: "ready",
+      launchCommand: "mock-agent",
+      launchArgs: ["--acp"],
+    };
+    const models: ModelState = {
+      currentModelId: "fast",
+      availableModels: [
+        {
+          modelId: "fast",
+          name: "Fast",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "model-probe-session",
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn(() => new Promise<never>(() => undefined)),
+    };
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    });
+
+    await expect(withTimeout(manager.getAgentModels(agent), 20)).resolves.toEqual(models);
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("times out model probes that never finish startup", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "slow-agent",
+      name: "Slow Agent",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "slow-agent",
+      },
+      status: "ready",
+      launchCommand: "slow-agent",
+      launchArgs: ["--acp"],
+    };
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      modelProbeTimeoutMs: 1,
+      createRuntime: vi.fn(() => new Promise<never>(() => undefined)),
+    });
+
+    await expect(manager.getAgentModels(agent)).rejects.toThrow("Model probe timed out after 1ms");
+  });
 });
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}

@@ -129,6 +129,20 @@ export interface BrowserContextBundle {
   capturedAt: string;
 }
 
+export interface PageTaskTemplate {
+  id: string;
+  title: string;
+  promptTemplate: string;
+  enabled: boolean;
+}
+
+export interface BrowserContextTimelineEntry {
+  id: string;
+  reason: string;
+  capturedAt: string;
+  context: BrowserContextBundle;
+}
+
 export interface DebugLogEntry {
   timestamp: string;
   scope: string;
@@ -141,6 +155,17 @@ export interface PromptEnvelope {
   agentId: string;
   text: string;
   context: BrowserContextBundle;
+}
+
+export interface ModelInfo {
+  modelId: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface ModelState {
+  currentModelId: string;
+  availableModels: ModelInfo[];
 }
 
 export interface ConversationSummary {

@@ -13,15 +13,8 @@ export const SIDEPANEL_DEFAULT_PATH = "sidepanel.html";
 export const EXTENSION_STORAGE_KEYS = {
   debugLogs: "browser-acp-debug-logs",
   pendingSelectionAction: "browser-acp-pending-selection-action",
-} as const;
-
-export const SELECTION_ACTION_PROMPTS = {
-  explain: (selectionText: string) =>
-    `请解释下面这段内容，结合当前页面上下文说明重点和含义：\n\n${selectionText.trim()}`,
-  search: (selectionText: string) =>
-    `请基于下面这段内容，提炼搜索关键词、核心问题，并给出后续搜索方向：\n\n${selectionText.trim()}`,
-  examples: (selectionText: string) =>
-    `请基于下面这段内容，给出具体样例或示例代码，并说明如何使用：\n\n${selectionText.trim()}`,
+  pageTaskTemplates: "browser-acp-page-task-templates",
+  contextHistory: "browser-acp-context-history",
 } as const;
 
 export function createDaemonBaseUrl(port: number): string {

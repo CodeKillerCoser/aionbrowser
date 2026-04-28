@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import type { AgentIconSpec, AgentSpec, AgentSpecCandidate, ResolvedAgent } from "@browser-acp/shared-types";
+import type { AgentIconSpec, AgentSpec, AgentSpecCandidate, PageTaskTemplate, ResolvedAgent } from "@browser-acp/shared-types";
 import {
   buildCandidateAgentSpecInput,
   buildManualAgentSpecInput,
   buildUploadedAgentIcon,
   canSaveManualAgentSpec,
   collectRecommendedCandidateIds,
+  createPageTaskTemplate,
   getErrorMessage,
   getFirstCreatedAgentSpecId,
   getNextSelectedAgentIdAfterDelete,
   selectAgentSpecCandidates,
+  sanitizePageTaskTemplates,
   toggleCandidateSelection,
 } from "@browser-acp/client-core";
 import type { BrowserAcpBridge } from "../../../host-api/agentConsoleHost";
@@ -46,6 +48,8 @@ export function useAgentSettingsPanel({
   const [candidateScanBusy, setCandidateScanBusy] = useState(false);
   const [agentSpecCandidates, setAgentSpecCandidates] = useState<AgentSpecCandidate[]>([]);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(() => new Set());
+  const [pageTaskTemplates, setPageTaskTemplates] = useState<PageTaskTemplate[]>(() => sanitizePageTaskTemplates(null));
+  const [pageTaskSettingsBusy, setPageTaskSettingsBusy] = useState(false);
 
   useEffect(() => {
     if (!visible || !hostReady) {
@@ -53,6 +57,7 @@ export function useAgentSettingsPanel({
     }
 
     void refreshAgentSpecCandidates();
+    void refreshPageTaskTemplates();
   }, [visible, hostReady]);
 
   async function refreshAgentSpecCandidates() {
@@ -231,6 +236,65 @@ export function useAgentSettingsPanel({
     }
   }
 
+  async function refreshPageTaskTemplates() {
+    if (!hostReady) {
+      return;
+    }
+
+    try {
+      setPageTaskTemplates(sanitizePageTaskTemplates(await bridge.listPageTaskTemplates()));
+    } catch (taskTemplateError) {
+      const message = getErrorMessage(taskTemplateError);
+      setError(message);
+      recordPanelLog("page task template load failed", {
+        error: message,
+      });
+    }
+  }
+
+  function handlePageTaskTemplateChange(templateId: string, patch: Partial<PageTaskTemplate>) {
+    setPageTaskTemplates((current) =>
+      current.map((template) => template.id === templateId ? { ...template, ...patch } : template),
+    );
+  }
+
+  function handlePageTaskTemplateAdd() {
+    setPageTaskTemplates((current) => [...current, createPageTaskTemplate()]);
+  }
+
+  function handlePageTaskTemplateDelete(templateId: string) {
+    setPageTaskTemplates((current) => sanitizePageTaskTemplates(current.filter((template) => template.id !== templateId)));
+  }
+
+  function handlePageTaskTemplatesReset() {
+    setPageTaskTemplates(sanitizePageTaskTemplates(null));
+  }
+
+  async function handlePageTaskTemplatesSave() {
+    if (!hostReady || pageTaskSettingsBusy) {
+      return;
+    }
+
+    setPageTaskSettingsBusy(true);
+    try {
+      const sanitized = sanitizePageTaskTemplates(pageTaskTemplates);
+      await bridge.updatePageTaskTemplates(sanitized);
+      setPageTaskTemplates(sanitized);
+      setError(null);
+      recordPanelLog("page task templates saved", {
+        count: sanitized.length,
+      });
+    } catch (saveError) {
+      const message = getErrorMessage(saveError);
+      setError(message);
+      recordPanelLog("page task template save failed", {
+        error: message,
+      });
+    } finally {
+      setPageTaskSettingsBusy(false);
+    }
+  }
+
   return {
     agentSpecCandidates,
     agentSpecs,
@@ -241,11 +305,18 @@ export function useAgentSettingsPanel({
     settingsCommand,
     settingsArgs,
     settingsIconUrl,
+    pageTaskTemplates,
+    pageTaskSettingsBusy,
     getCandidateIconSrc: resolveCandidateIcon,
     getSpecIconSrc: resolveSpecIcon,
     onAddSelectedCandidates: () => void handleAddSelectedCandidates(),
     onDeleteAgentSpec: handleDeleteAgentSpec,
     onIconUpload: (file: File | undefined) => void handleIconUpload(file),
+    onPageTaskTemplateAdd: handlePageTaskTemplateAdd,
+    onPageTaskTemplateChange: handlePageTaskTemplateChange,
+    onPageTaskTemplateDelete: handlePageTaskTemplateDelete,
+    onPageTaskTemplatesReset: handlePageTaskTemplatesReset,
+    onPageTaskTemplatesSave: () => void handlePageTaskTemplatesSave(),
     onRefreshCandidates: () => void refreshAgentSpecCandidates(),
     onSaveAgentSpec: () => void handleSaveAgentSpec(),
     onSettingsArgsChange: setSettingsArgs,

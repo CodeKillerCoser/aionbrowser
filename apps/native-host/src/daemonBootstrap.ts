@@ -228,13 +228,34 @@ export function buildDaemonEnvironment(
   baseEnv: NodeJS.ProcessEnv,
   shellEnv: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
+  const home = shellEnv.HOME ?? baseEnv.HOME;
   return {
     ...baseEnv,
     ...shellEnv,
-    PATH: shellEnv.PATH ?? baseEnv.PATH,
-    HOME: shellEnv.HOME ?? baseEnv.HOME,
+    PATH: augmentPathWithUserBinDirs(shellEnv.PATH ?? baseEnv.PATH, home),
+    HOME: home,
     SHELL: shellEnv.SHELL ?? baseEnv.SHELL,
   };
+}
+
+function augmentPathWithUserBinDirs(pathValue: string | undefined, home: string | undefined): string | undefined {
+  if (!pathValue || !home) {
+    return pathValue;
+  }
+
+  const entries = pathValue.split(":").filter(Boolean);
+  for (const candidate of [
+    `${home}/.npm-global/bin`,
+    `${home}/.local/bin`,
+    `${home}/.bun/bin`,
+    `${home}/.cargo/bin`,
+  ]) {
+    if (!entries.includes(candidate)) {
+      entries.push(candidate);
+    }
+  }
+
+  return entries.join(":");
 }
 
 export async function loadLoginShellEnvironment(

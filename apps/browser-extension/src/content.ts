@@ -1,5 +1,7 @@
 import { capturePageContextInPage } from "./pageCapture";
-import type { BackgroundRequest, SelectionActionType } from "./messages";
+import { DEFAULT_PAGE_TASK_TEMPLATES, sanitizePageTaskTemplates } from "@browser-acp/client-core";
+import type { PageTaskTemplate } from "@browser-acp/shared-types";
+import type { BackgroundRequest, BackgroundRuntimeMessage } from "./messages";
 
 declare global {
   interface Window {
@@ -7,14 +9,9 @@ declare global {
   }
 }
 
-const QUICK_ACTIONS: Array<{ action: SelectionActionType; label: string }> = [
-  { action: "explain", label: "解释" },
-  { action: "search", label: "搜索" },
-  { action: "examples", label: "提供样例" },
-];
-
 let selectionMenu: HTMLDivElement | null = null;
 let selectionText = "";
+let pageTaskTemplates: PageTaskTemplate[] = DEFAULT_PAGE_TASK_TEMPLATES;
 
 function publishPageContext(): void {
   const message: BackgroundRequest = {
@@ -31,7 +28,7 @@ function closeSelectionMenu(): void {
   selectionMenu = null;
 }
 
-function dispatchSelectionAction(action: SelectionActionType): void {
+function dispatchSelectionAction(templateId: string): void {
   if (selectionText.trim().length === 0) {
     closeSelectionMenu();
     return;
@@ -39,7 +36,7 @@ function dispatchSelectionAction(action: SelectionActionType): void {
 
   const message: BackgroundRequest = {
     type: "browser-acp/trigger-selection-action",
-    action,
+    templateId,
     selectionText,
   };
 
@@ -66,11 +63,11 @@ function ensureSelectionMenu(): HTMLDivElement {
   menu.style.fontFamily = "system-ui, sans-serif";
   menu.style.alignItems = "center";
 
-  for (const quickAction of QUICK_ACTIONS) {
+  for (const quickAction of pageTaskTemplates.filter((template) => template.enabled)) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = quickAction.label;
-    button.dataset.browserAcpSelectionAction = quickAction.action;
+    button.textContent = quickAction.title;
+    button.dataset.browserAcpSelectionAction = quickAction.id;
     button.style.border = "0";
     button.style.borderRadius = "8px";
     button.style.padding = "6px 10px";
@@ -82,7 +79,7 @@ function ensureSelectionMenu(): HTMLDivElement {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      dispatchSelectionAction(quickAction.action);
+      dispatchSelectionAction(quickAction.id);
     });
     menu.appendChild(button);
   }
@@ -109,16 +106,40 @@ function positionSelectionMenu(menu: HTMLDivElement, x: number, y: number): void
 
 function scheduleSelectionMenu(event: MouseEvent): void {
   window.setTimeout(() => {
-    const nextSelectionText = capturePageContextInPage().selectionText.trim();
-    if (nextSelectionText.length === 0) {
-      closeSelectionMenu();
-      return;
-    }
-
-    selectionText = nextSelectionText;
-    const menu = ensureSelectionMenu();
-    positionSelectionMenu(menu, event.clientX, event.clientY);
+    void showSelectionMenu(event);
   }, 0);
+}
+
+async function showSelectionMenu(event: MouseEvent): Promise<void> {
+  await refreshPageTaskTemplates();
+  const nextSelectionText = capturePageContextInPage().selectionText.trim();
+  if (nextSelectionText.length === 0) {
+    closeSelectionMenu();
+    return;
+  }
+
+  selectionText = nextSelectionText;
+  const menu = ensureSelectionMenu();
+  positionSelectionMenu(menu, event.clientX, event.clientY);
+}
+
+function refreshPageTaskTemplates(): Promise<void> {
+  return new Promise((resolve) => {
+    const message: BackgroundRequest = {
+      type: "browser-acp/list-page-task-templates",
+    };
+
+    chrome.runtime.sendMessage(message, (response) => {
+      const nextTemplates = sanitizePageTaskTemplates(response);
+      const changed = JSON.stringify(nextTemplates) !== JSON.stringify(pageTaskTemplates);
+      pageTaskTemplates = nextTemplates;
+      if (changed) {
+        selectionMenu?.remove();
+        selectionMenu = null;
+      }
+      resolve();
+    });
+  });
 }
 
 function handleDocumentMouseDown(event: MouseEvent): void {
@@ -147,6 +168,7 @@ function installSelectionQuickActions(): void {
   document.addEventListener("keydown", handleEscape, true);
   window.addEventListener("scroll", closeSelectionMenu, true);
   window.addEventListener("load", publishPageContext);
+  chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
   window.__browserAcpSelectionMenuCleanup__ = () => {
     document.removeEventListener("mouseup", scheduleSelectionMenu, true);
@@ -154,8 +176,19 @@ function installSelectionQuickActions(): void {
     document.removeEventListener("keydown", handleEscape, true);
     window.removeEventListener("scroll", closeSelectionMenu, true);
     window.removeEventListener("load", publishPageContext);
+    chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     closeSelectionMenu();
   };
+}
+
+function handleRuntimeMessage(message: BackgroundRuntimeMessage): void {
+  if (message.type !== "browser-acp/page-task-templates-changed") {
+    return;
+  }
+
+  pageTaskTemplates = sanitizePageTaskTemplates(message.templates);
+  selectionMenu?.remove();
+  selectionMenu = null;
 }
 
 installSelectionQuickActions();

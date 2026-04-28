@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentSpec,
   BrowserContextBundle,
   ConversationSummary,
+  ModelState,
   NativeHostBootstrapResponse,
   PromptEnvelope,
   ResolvedAgent,
@@ -90,6 +91,22 @@ const sessions: ConversationSummary[] = [
   }
 ];
 
+const modelState: ModelState = {
+  currentModelId: "fast",
+  availableModels: [
+    {
+      modelId: "fast",
+      name: "Fast",
+      description: "Lower latency",
+    },
+    {
+      modelId: "smart",
+      name: "Smart",
+      description: "Higher quality",
+    },
+  ],
+};
+
 const debugState: BackgroundDebugState = {
   extensionId: "fignfifoniblkonapihmkfakmlgkbkcf",
   nativeHostName: "com.browser_acp.host",
@@ -137,6 +154,10 @@ const agentSpecs: AgentSpec[] = [
   },
 ];
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("BrowserAcpPanel", () => {
   it("loads agents, sessions, and exposes current context from one debug panel", async () => {
     const bridge = createBridge();
@@ -161,13 +182,15 @@ describe("BrowserAcpPanel", () => {
     const sendPrompt = vi.fn();
     const bridge = createBridge({
       listSessions: vi.fn().mockResolvedValue([]),
-      createSession: vi.fn().mockResolvedValue({
-        ...sessions[0],
-        id: "session-2",
-        agentId: "mock-agent",
-        agentName: "Mock Agent",
-        title: "New thread",
-      }),
+      createSession: vi.fn().mockImplementation((agentId: string) =>
+        Promise.resolve({
+          ...sessions[0],
+          id: agentId === "mock-agent" ? "session-2" : "session-gemini",
+          agentId,
+          agentName: agentId === "mock-agent" ? "Mock Agent" : "Gemini CLI",
+          title: "New thread",
+        }),
+      ),
       connectSession: vi.fn().mockImplementation((sessionId, onMessage, _onError, onStatus) => {
         onMessage({
           type: "event",
@@ -211,6 +234,243 @@ describe("BrowserAcpPanel", () => {
           context,
         } satisfies Partial<PromptEnvelope>),
       );
+    });
+  });
+
+  it("shows session models and switches the active model", async () => {
+    const pendingModels = createDeferred<ModelState>();
+    const getSessionModels = vi.fn().mockReturnValue(pendingModels.promise);
+    const setSessionModel = vi.fn().mockResolvedValue({
+      ...modelState,
+      currentModelId: "smart",
+    });
+    const bridge = createBridge({
+      getSessionModels,
+      setSessionModel,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    const loadingButton = await screen.findByRole("button", { name: "模型列表加载中" });
+    expect(loadingButton).toBeDisabled();
+    expect(loadingButton.closest(".browser-acp-composer-footer")).not.toBeNull();
+    expect(loadingButton.closest(".browser-acp-header")).toBeNull();
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+
+    pendingModels.resolve(modelState);
+
+    const modelButton = await screen.findByRole("button", { name: "选择模型：Fast" });
+    fireEvent.click(modelButton);
+    expect(screen.getByRole("dialog", { name: "模型列表" })).toHaveClass("browser-acp-model-selector-popover");
+    expect(document.querySelector(".browser-acp-model-selector-backdrop")).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "可选模型" })).toHaveClass(
+      "browser-acp-model-selector-options",
+    );
+    fireEvent.mouseDown(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."));
+    fireEvent.click(screen.getByPlaceholderText("询问当前页面，或直接输入任务..."));
+    expect(screen.queryByRole("dialog", { name: "模型列表" })).not.toBeInTheDocument();
+
+    fireEvent.click(modelButton);
+    expect(screen.getByRole("dialog", { name: "模型列表" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.querySelector(".browser-acp-model-selector-backdrop") as Element);
+    expect(screen.queryByRole("dialog", { name: "模型列表" })).not.toBeInTheDocument();
+
+    fireEvent.click(modelButton);
+    expect(screen.getByRole("dialog", { name: "模型列表" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "模型列表" })).not.toBeInTheDocument();
+
+    fireEvent.click(modelButton);
+    fireEvent.click(screen.getByRole("option", { name: "Smart Higher quality" }));
+
+    await waitFor(() => {
+      expect(getSessionModels).toHaveBeenCalledWith("session-1");
+      expect(setSessionModel).toHaveBeenCalledWith("session-1", "smart");
+      expect(screen.getByRole("button", { name: "选择模型：Smart" })).toBeInTheDocument();
+    });
+  });
+
+  it("loads model choices for a new conversation without creating an empty session", async () => {
+    const pendingModels = createDeferred<ModelState>();
+    const createSession = vi.fn();
+    const getAgentModels = vi.fn().mockReturnValue(pendingModels.promise);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      createSession,
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    expect(screen.queryByRole("button", { name: "选择模型：Fast" })).not.toBeInTheDocument();
+
+    expect(await screen.findByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+
+    pendingModels.resolve(modelState);
+
+    await waitFor(() => {
+      expect(createSession).not.toHaveBeenCalled();
+      expect(getAgentModels).toHaveBeenCalledWith("gemini-cli");
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("preloads other agent model choices in the background after the active agent", async () => {
+    const activeModels = createDeferred<ModelState>();
+    const backgroundModels = createDeferred<ModelState>();
+    const getAgentModels = vi.fn().mockImplementation((agentId: string) => {
+      if (agentId === "gemini-cli") {
+        return activeModels.promise;
+      }
+
+      return backgroundModels.promise;
+    });
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    await waitFor(() => {
+      expect(getAgentModels).toHaveBeenCalledWith("gemini-cli");
+    });
+    expect(getAgentModels).not.toHaveBeenCalledWith("mock-agent");
+
+    activeModels.resolve(modelState);
+
+    await waitFor(() => {
+      expect(getAgentModels).toHaveBeenCalledWith("mock-agent");
+    });
+  });
+
+  it("reuses a background model preload when that agent becomes selected", async () => {
+    const backgroundModels = createDeferred<ModelState>();
+    const getAgentModels = vi.fn().mockImplementation((agentId: string) => {
+      if (agentId === "mock-agent") {
+        return backgroundModels.promise;
+      }
+
+      return Promise.resolve(modelState);
+    });
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    await waitFor(() => {
+      expect(getAgentModels).toHaveBeenCalledWith("mock-agent");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mock Agent ready" }));
+    expect(await screen.findByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+
+    backgroundModels.resolve(modelState);
+
+    await waitFor(() => {
+      expect(getAgentModels.mock.calls.filter(([agentId]) => agentId === "mock-agent")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("stops showing model loading when a model request never settles", async () => {
+    const getAgentModels = vi.fn().mockReturnValue(new Promise<ModelState>(() => undefined));
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    expect(await screen.findByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(screen.queryByRole("button", { name: "模型列表加载中" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "获取模型列表" })).toBeInTheDocument();
+  });
+
+  it("keeps a newer model request loading when an older timed-out request settles", async () => {
+    const firstModels = createDeferred<ModelState>();
+    const secondModels = createDeferred<ModelState>();
+    const backgroundModels = createDeferred<ModelState>();
+    const geminiRequests = [firstModels.promise, secondModels.promise];
+    const getAgentModels = vi.fn().mockImplementation((agentId: string) => {
+      if (agentId === "gemini-cli") {
+        return geminiRequests.shift() ?? secondModels.promise;
+      }
+
+      return backgroundModels.promise;
+    });
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    expect(await screen.findByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    fireEvent.click(screen.getByRole("button", { name: "获取模型列表" }));
+    expect(await screen.findByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+
+    firstModels.reject(new Error("Stale model request failed"));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole("button", { name: "模型列表加载中" })).toBeDisabled();
+    expect(getAgentModels.mock.calls.filter(([agentId]) => agentId === "gemini-cli")).toHaveLength(2);
+
+    secondModels.resolve(modelState);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("renames and deletes sessions from the sidebar context menu", async () => {
+    const renameSession = vi.fn().mockResolvedValue({
+      ...sessions[0],
+      title: "Renamed thread",
+    });
+    const deleteSession = vi.fn().mockResolvedValue({ ok: true });
+    const bridge = createBridge({
+      renameSession,
+      deleteSession,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    const sessionItem = await screen.findByRole("button", { name: "Existing thread" });
+    fireEvent.contextMenu(sessionItem);
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名" }));
+
+    const renameInput = screen.getByLabelText("对话名称");
+    fireEvent.change(renameInput, {
+      target: { value: "Renamed thread" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+
+    await waitFor(() => {
+      expect(renameSession).toHaveBeenCalledWith("session-1", "Renamed thread");
+      expect(screen.getByRole("button", { name: "Renamed thread" })).toBeInTheDocument();
+    });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Renamed thread" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+
+    await waitFor(() => {
+      expect(deleteSession).toHaveBeenCalledWith("session-1");
+      expect(screen.queryByRole("button", { name: "Renamed thread" })).not.toBeInTheDocument();
     });
   });
 
@@ -335,16 +595,16 @@ describe("BrowserAcpPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
     expect(await screen.findByRole("button", { name: "返回对话" })).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Debug" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Agent name"), {
+    fireEvent.change(screen.getByLabelText("名称"), {
       target: { value: "New ACP Agent" },
     });
-    fireEvent.change(screen.getByLabelText("Launch command"), {
+    fireEvent.change(screen.getByLabelText("启动命令"), {
       target: { value: "new-agent" },
     });
-    fireEvent.change(screen.getByLabelText("Launch arguments"), {
+    fireEvent.change(screen.getByLabelText("启动参数"), {
       target: { value: "--acp --profile dev" },
     });
-    fireEvent.change(screen.getByLabelText("Icon URL"), {
+    fireEvent.change(screen.getByLabelText("图标 URL"), {
       target: { value: "https://example.com/new.svg" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存 Agent" }));
@@ -399,7 +659,7 @@ describe("BrowserAcpPanel", () => {
     await screen.findByRole("button", { name: "Gemini CLI ready" });
     fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
 
-    expect(await screen.findByText("检测到可添加的 Agent")).toBeInTheDocument();
+    expect(await screen.findByText("可添加的 Agent")).toBeInTheDocument();
     expect(screen.getByText("gemini --experimental-acp")).toBeInTheDocument();
     expect(screen.getByText("/shell/bin/gemini")).toBeInTheDocument();
     expect(container.querySelector(".browser-acp-settings-candidate-row .browser-acp-settings-agent-icon img")).toBeInTheDocument();
@@ -1363,11 +1623,17 @@ describe("BrowserAcpPanel", () => {
         promptText: "请解释下面这段内容，结合当前页面上下文说明重点和含义：\n\nBeta",
         createdAt: "2026-04-08T13:20:00.000Z",
       }),
-      connectSession: vi.fn().mockImplementation(() => ({
-        sendPrompt,
-        resolvePermission: vi.fn(),
-        close: vi.fn(),
-      })),
+      connectSession: vi.fn().mockImplementation((sessionId, _onMessage, _onError, onStatus) => {
+        queueMicrotask(() => {
+          onStatus?.("open", { sessionId });
+        });
+
+        return {
+          sendPrompt,
+          resolvePermission: vi.fn(),
+          close: vi.fn(),
+        } satisfies BrowserAcpSocket;
+      }),
     });
 
     render(<BrowserAcpPanel bridge={bridge} />);
@@ -1527,6 +1793,8 @@ describe("BrowserAcpPanel", () => {
 
     await openDebugPanel();
 
+    const drawer = screen.getByRole("complementary", { name: "调试面板" });
+    expect(drawer).toHaveClass("browser-acp-debug-drawer");
     expect(screen.getByText("Current Page")).toBeInTheDocument();
     expect(screen.getByText("Selected Text")).toBeInTheDocument();
     expect(screen.getByText("Runtime Logs")).toBeInTheDocument();
@@ -1574,11 +1842,22 @@ function createBridge(overrides: Partial<BrowserAcpBridge> = {}): BrowserAcpBrid
     deleteAgentSpec: vi.fn(),
     listSessions: vi.fn().mockResolvedValue(sessions),
     getActiveContext: vi.fn().mockResolvedValue(context),
+    listPageTaskTemplates: vi.fn().mockResolvedValue([]),
+    updatePageTaskTemplates: vi.fn().mockResolvedValue({ ok: true }),
+    listContextHistory: vi.fn().mockResolvedValue([]),
     subscribeToActiveContext: vi.fn().mockReturnValue(vi.fn()),
     claimPendingSelectionAction: vi.fn().mockResolvedValue(null),
     subscribeToSelectionActions: vi.fn().mockReturnValue(vi.fn()),
     getDebugState: vi.fn().mockResolvedValue(debugState),
     createSession: vi.fn().mockResolvedValue(sessions[0]),
+    renameSession: vi.fn().mockImplementation(async (sessionId: string, title: string) => ({
+      ...sessions.find((session) => session.id === sessionId),
+      title,
+    })),
+    deleteSession: vi.fn().mockResolvedValue({ ok: true }),
+    getAgentModels: vi.fn().mockResolvedValue(null),
+    getSessionModels: vi.fn().mockResolvedValue(null),
+    setSessionModel: vi.fn().mockResolvedValue(null),
     connectSession: vi.fn().mockImplementation(() => ({
       sendPrompt: vi.fn(),
       resolvePermission: vi.fn(),

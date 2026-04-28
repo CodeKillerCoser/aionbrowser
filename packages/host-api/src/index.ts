@@ -1,9 +1,12 @@
 import type {
   AgentSpec,
   AgentSpecCandidate,
+  BrowserContextTimelineEntry,
   ConversationSummary,
   ExternalAgentSpecInput,
   ExternalAgentSpecPatch,
+  ModelState,
+  PageTaskTemplate,
   PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
@@ -38,10 +41,18 @@ export interface AgentConsoleHost<
   listSessions(): Promise<ConversationSummary[]>;
   getActiveContext(): Promise<TContext>;
   subscribeToActiveContext(onContext: (context: TContext) => void): () => void;
+  listPageTaskTemplates(): Promise<PageTaskTemplate[]>;
+  updatePageTaskTemplates(templates: PageTaskTemplate[]): Promise<{ ok: true }>;
+  listContextHistory(): Promise<BrowserContextTimelineEntry[]>;
   claimPendingSelectionAction(): Promise<TPendingAction | null>;
   subscribeToSelectionActions(onReady: () => void): () => void;
   getDebugState(): Promise<TDebugState>;
   createSession(agentId: string, context: TContext): Promise<ConversationSummary>;
+  renameSession(sessionId: string, title: string): Promise<ConversationSummary>;
+  deleteSession(sessionId: string): Promise<{ ok: true }>;
+  getAgentModels(agentId: string): Promise<ModelState | null>;
+  getSessionModels(sessionId: string): Promise<ModelState | null>;
+  setSessionModel(sessionId: string, modelId: string): Promise<ModelState | null>;
   connectSession(
     sessionId: string,
     onMessage: (message: TServerMessage) => void,

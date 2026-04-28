@@ -46,9 +46,22 @@ export {
 } from "./optimisticPrompts.js";
 
 export {
+  MODEL_CACHE_TTL_MS,
+  createModelCache,
+  type ModelCache,
+} from "./modelCache.js";
+
+export {
   buildPromptEnvelope,
   canSubmitPrompt,
 } from "./promptSubmission.js";
+
+export {
+  DEFAULT_PAGE_TASK_TEMPLATES,
+  createPageTaskTemplate,
+  renderPageTaskPrompt,
+  sanitizePageTaskTemplates,
+} from "./pageTaskTemplates.js";
 
 export {
   canProcessSelectionAction,

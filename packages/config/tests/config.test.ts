@@ -4,7 +4,6 @@ import {
   DAEMON_HOST,
   DAEMON_LOG_FILE_NAME,
   EXTENSION_STORAGE_KEYS,
-  SELECTION_ACTION_PROMPTS,
   SIDEPANEL_DEFAULT_PATH,
   createDaemonBaseUrl,
 } from "../src/index";
@@ -17,6 +16,7 @@ describe("shared config", () => {
     expect(DAEMON_LOG_FILE_NAME).toBe("daemon.log");
     expect(SIDEPANEL_DEFAULT_PATH).toBe("sidepanel.html");
     expect(EXTENSION_STORAGE_KEYS.debugLogs).toBe("browser-acp-debug-logs");
-    expect(SELECTION_ACTION_PROMPTS.explain("Beta")).toContain("Beta");
+    expect(EXTENSION_STORAGE_KEYS.pageTaskTemplates).toBe("browser-acp-page-task-templates");
+    expect(EXTENSION_STORAGE_KEYS.contextHistory).toBe("browser-acp-context-history");
   });
 });

@@ -1,10 +1,12 @@
 import type {
   ConversationSummary,
+  ModelState,
   PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
   SessionEvent,
 } from "@browser-acp/shared-types";
+import { LRUCache } from "lru-cache";
 import type {
   RuntimeDebugLogger,
   RuntimeHost,
@@ -19,6 +21,7 @@ export interface CreateSessionInput {
 
 export interface SessionStoreRepository {
   saveSummary(summary: ConversationSummary): Promise<void>;
+  deleteSummary(sessionId: string): Promise<void>;
   readSummary(sessionId: string): Promise<ConversationSummary | null>;
   listSummaries(): Promise<ConversationSummary[]>;
   appendEvent(sessionId: string, event: SessionEvent): Promise<void>;
@@ -33,10 +36,13 @@ export interface SessionManagerOptions {
   createRuntime?: (input: RuntimeSessionCreateInput) => Promise<RuntimeSessionLike>;
   runtimeHost?: RuntimeHost;
   maxActiveRuntimes?: number;
+  modelProbeTimeoutMs?: number;
   createTurnId?: () => string;
 }
 
 type Subscriber = (event: SessionEvent) => void;
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const MODEL_PROBE_TIMEOUT_MS = 15 * 1000;
 
 export class SessionManager {
   private readonly subscribers = new Map<string, Set<Subscriber>>();
@@ -44,6 +50,15 @@ export class SessionManager {
   private readonly runtimeLastUsedAt = new Map<string, number>();
   private readonly summaries = new Map<string, ConversationSummary>();
   private readonly eventChains = new Map<string, Promise<void>>();
+  private readonly modelCache = new LRUCache<string, ModelState>({
+    max: 200,
+    ttl: MODEL_CACHE_TTL_MS,
+  });
+  private readonly agentModelCache = new LRUCache<string, ModelState>({
+    max: 100,
+    ttl: MODEL_CACHE_TTL_MS,
+  });
+  private readonly agentModelProbePromises = new Map<string, Promise<ModelState | null>>();
 
   constructor(
     private readonly options: SessionManagerOptions,
@@ -74,6 +89,7 @@ export class SessionManager {
     };
 
     this.attachRuntime(summary.id, runtime);
+    this.cacheModels(summary.id, runtime.getModelState());
     this.summaries.set(summary.id, summary);
     await this.options.store.saveSummary(summary);
     this.options.logger?.log("session", "session created", {
@@ -203,6 +219,41 @@ export class SessionManager {
     });
   }
 
+  async renameSession(sessionId: string, title: string): Promise<ConversationSummary> {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      throw new Error("Session title cannot be empty");
+    }
+
+    const summary = await this.getSummary(sessionId);
+    if (!summary) {
+      throw new Error(`Session ${sessionId} was not found`);
+    }
+
+    const updatedSummary: ConversationSummary = {
+      ...summary,
+      title: nextTitle,
+    };
+    this.summaries.set(sessionId, updatedSummary);
+    await this.options.store.saveSummary(updatedSummary);
+    return updatedSummary;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) {
+      this.runtimes.delete(sessionId);
+      this.runtimeLastUsedAt.delete(sessionId);
+      await runtime.dispose();
+    }
+
+    this.subscribers.delete(sessionId);
+    this.eventChains.delete(sessionId);
+    this.modelCache.delete(sessionId);
+    this.summaries.delete(sessionId);
+    await this.options.store.deleteSummary(sessionId);
+  }
+
   async cancel(sessionId: string): Promise<void> {
     const runtime = this.runtimes.get(sessionId);
     if (!runtime) {
@@ -220,6 +271,100 @@ export class SessionManager {
 
     this.touchRuntime(sessionId);
     await runtime.resolvePermission(decision);
+  }
+
+  async getModels(sessionId: string): Promise<ModelState | null> {
+    const cached = this.modelCache.get(sessionId);
+    if (cached) {
+      return cached;
+    }
+
+    const summary = await this.getSummary(sessionId);
+    if (!summary) {
+      throw new Error(`Session ${sessionId} was not found`);
+    }
+
+    const activeRuntime = this.runtimes.get(sessionId);
+    if (activeRuntime) {
+      const models = activeRuntime.getModelState();
+      this.cacheModels(sessionId, models);
+      this.touchRuntime(sessionId);
+      return models;
+    }
+
+    try {
+      const runtime = await this.ensureRuntime(summary, summary.agentId);
+      const models = runtime.getModelState();
+      this.cacheModels(sessionId, models);
+      return models;
+    } catch (error) {
+      const agent = await this.options.resolveAgent?.(summary.agentId);
+      if (!agent) {
+        throw error;
+      }
+
+      this.options.logger?.log("session", "session model restore failed; probing agent models", {
+        sessionId,
+        agentId: summary.agentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.getAgentModels(agent);
+    }
+  }
+
+  async getAgentModels(agent: ResolvedAgent): Promise<ModelState | null> {
+    const cached = this.agentModelCache.get(agent.id);
+    if (cached) {
+      return cached;
+    }
+
+    const pendingProbe = this.agentModelProbePromises.get(agent.id);
+    if (pendingProbe) {
+      this.options.logger?.log("session", "agent model probe joined", {
+        agentId: agent.id,
+        agentName: agent.name,
+      });
+      return pendingProbe;
+    }
+
+    this.options.logger?.log("session", "agent model probe requested", {
+      agentId: agent.id,
+      agentName: agent.name,
+      launchCommand: agent.launchCommand,
+      launchArgs: agent.launchArgs,
+    });
+
+    const probe = this.probeAgentModels(agent);
+    this.agentModelProbePromises.set(agent.id, probe);
+    try {
+      return await probe;
+    } finally {
+      if (this.agentModelProbePromises.get(agent.id) === probe) {
+        this.agentModelProbePromises.delete(agent.id);
+      }
+    }
+  }
+
+  async setModel(sessionId: string, modelId: string): Promise<ModelState | null> {
+    const summary = await this.getSummary(sessionId);
+    if (!summary) {
+      throw new Error(`Session ${sessionId} was not found`);
+    }
+
+    const runtime = await this.ensureRuntime(summary, summary.agentId);
+    this.touchRuntime(sessionId);
+    const models = await runtime.setModel(modelId);
+    this.cacheModels(sessionId, models);
+    const updatedSummary: ConversationSummary = {
+      ...summary,
+      active: true,
+      readOnly: false,
+      lastActivityAt: new Date().toISOString(),
+    };
+    this.summaries.set(sessionId, updatedSummary);
+    await this.options.store.saveSummary(updatedSummary);
+
+    return models;
   }
 
   async dispose(): Promise<void> {
@@ -280,6 +425,7 @@ export class SessionManager {
     try {
       const runtime = await this.createRuntime(resolvedAgent, summary.id);
       this.attachRuntime(summary.id, runtime);
+      this.cacheModels(summary.id, runtime.getModelState());
       await this.updateSummary(summary.id, {
         active: true,
         readOnly: false,
@@ -293,16 +439,22 @@ export class SessionManager {
     }
   }
 
-  private async createRuntime(agent: ResolvedAgent, resumeSessionId?: string): Promise<RuntimeSessionLike> {
+  private async createRuntime(
+    agent: ResolvedAgent,
+    resumeSessionId?: string,
+    onEvent: RuntimeSessionCreateInput["onEvent"] = async (event) => {
+      await this.recordEvent(event);
+    },
+    overrides: Pick<RuntimeSessionCreateInput, "allowAuthentication" | "startupTimeoutMs"> = {},
+  ): Promise<RuntimeSessionLike> {
     const runtimeInput: RuntimeSessionCreateInput = {
       cwd: this.options.defaultCwd,
       command: agent.launchCommand,
       args: agent.launchArgs,
       resumeSessionId,
-      onEvent: async (event) => {
-        await this.recordEvent(event);
-      },
+      onEvent,
       logger: this.options.logger,
+      ...overrides,
     };
 
     if (this.options.createRuntime) {
@@ -321,7 +473,32 @@ export class SessionManager {
       runtime: {
         onEvent: runtimeInput.onEvent,
         logger: runtimeInput.logger,
+        allowAuthentication: runtimeInput.allowAuthentication,
+        startupTimeoutMs: runtimeInput.startupTimeoutMs,
       },
+    });
+  }
+
+  private withModelProbeTimeout(
+    runtimePromise: Promise<RuntimeSessionLike>,
+  ): Promise<RuntimeSessionLike> {
+    const timeoutMs = this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS;
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Model probe timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      runtimePromise.then(
+        (runtime) => {
+          clearTimeout(timeout);
+          resolve(runtime);
+        },
+        (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      );
     });
   }
 
@@ -332,6 +509,53 @@ export class SessionManager {
 
   private touchRuntime(sessionId: string): void {
     this.runtimeLastUsedAt.set(sessionId, Date.now());
+  }
+
+  private cacheModels(sessionId: string, models: ModelState | null): void {
+    if (!models) {
+      this.modelCache.delete(sessionId);
+      return;
+    }
+
+    this.modelCache.set(sessionId, models);
+  }
+
+  private cacheAgentModels(agentId: string, models: ModelState | null): void {
+    if (!models) {
+      this.agentModelCache.delete(agentId);
+      return;
+    }
+
+    this.agentModelCache.set(agentId, models);
+  }
+
+  private async probeAgentModels(agent: ResolvedAgent): Promise<ModelState | null> {
+    const runtime = await this.withModelProbeTimeout(
+      this.createRuntime(agent, undefined, async () => undefined, {
+        allowAuthentication: false,
+        startupTimeoutMs: this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS,
+      }),
+    );
+    try {
+      const models = runtime.getModelState();
+      this.cacheAgentModels(agent.id, models);
+      return models;
+    } finally {
+      void this.disposeProbeRuntime(agent, runtime);
+    }
+  }
+
+  private async disposeProbeRuntime(agent: ResolvedAgent, runtime: RuntimeSessionLike): Promise<void> {
+    try {
+      await runtime.dispose();
+    } catch (error) {
+      this.options.logger?.log("session", "agent model probe runtime dispose failed", {
+        agentId: agent.id,
+        agentName: agent.name,
+        sessionId: runtime.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async evictRuntimeIfNeeded(exemptSessionId?: string): Promise<void> {

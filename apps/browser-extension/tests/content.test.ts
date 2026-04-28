@@ -78,6 +78,24 @@ describe("content script", () => {
           return;
         }
 
+        if (type === "browser-acp/list-page-task-templates") {
+          callback([
+            {
+              id: "custom-explain",
+              title: "讲讲",
+              promptTemplate: "讲讲 {{selectionText}}",
+              enabled: true,
+            },
+            {
+              id: "disabled",
+              title: "隐藏",
+              promptTemplate: "隐藏 {{selectionText}}",
+              enabled: false,
+            },
+          ]);
+          return;
+        }
+
         if (type === "browser-acp/get-debug-state") {
           callback({
             extensionId: "test-extension",
@@ -149,11 +167,12 @@ describe("content script", () => {
     document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 120, clientY: 80 }));
     await vi.runAllTimersAsync();
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "browser-acp/list-page-task-templates",
+    }), expect.any(Function));
     expect(document.querySelector("[data-browser-acp-selection-menu]")).not.toBeNull();
-    expect(document.querySelector("[data-browser-acp-selection-action='explain']")?.textContent).toBe("解释");
-    expect(document.querySelector("[data-browser-acp-selection-action='search']")?.textContent).toBe("搜索");
-    expect(document.querySelector("[data-browser-acp-selection-action='examples']")?.textContent).toBe("提供样例");
+    expect(document.querySelector("[data-browser-acp-selection-action='custom-explain']")?.textContent).toBe("讲讲");
+    expect(document.querySelector("[data-browser-acp-selection-action='disabled']")).toBeNull();
   });
 
   it("dispatches a quick action request with the selected text when a popup action is clicked", async () => {
@@ -166,13 +185,13 @@ describe("content script", () => {
     await vi.runAllTimersAsync();
 
     const explainButton = document.querySelector(
-      "[data-browser-acp-selection-action='explain']",
+      "[data-browser-acp-selection-action='custom-explain']",
     ) as HTMLButtonElement;
     explainButton.click();
 
     expect(sendMessage).toHaveBeenLastCalledWith({
       type: "browser-acp/trigger-selection-action",
-      action: "explain",
+      templateId: "custom-explain",
       selectionText: "Selection test page.",
     });
     expect(document.querySelector("[data-browser-acp-drawer-host]")).toBeNull();
@@ -188,7 +207,7 @@ describe("content script", () => {
     await vi.runAllTimersAsync();
 
     const explainButton = document.querySelector(
-      "[data-browser-acp-selection-action='explain']",
+      "[data-browser-acp-selection-action='custom-explain']",
     ) as HTMLButtonElement;
     explainButton.click();
 

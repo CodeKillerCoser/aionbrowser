@@ -1,4 +1,5 @@
-import { SELECTION_ACTION_PROMPTS } from "@browser-acp/config";
+import type { BrowserContextBundle, PageTaskTemplate } from "@browser-acp/shared-types";
+import { renderPageTaskPrompt } from "@browser-acp/client-core";
 import type { PendingSelectionAction, SelectionActionType } from "../messages";
 
 export interface PendingSelectionActionTarget {
@@ -13,6 +14,8 @@ export function createPendingSelectionActionService(deps: {
   persist(action: PendingSelectionAction): Promise<void>;
   load(): Promise<PendingSelectionAction | null>;
   clear(): Promise<void>;
+  getActiveContext(selectionText: string): Promise<BrowserContextBundle>;
+  listPageTaskTemplates(): Promise<PageTaskTemplate[]>;
   notifyReady(): Promise<void>;
   logQueuedAction(
     action: SelectionActionType,
@@ -31,11 +34,19 @@ export function createPendingSelectionActionService(deps: {
       selectionText: string,
       target: PendingSelectionActionTarget,
     ): Promise<{ ok: true }> {
+      const templates = await deps.listPageTaskTemplates();
+      const template =
+        templates.find((entry) => entry.id === action && entry.enabled) ??
+        templates.find((entry) => entry.enabled) ??
+        templates[0];
+      const context = await deps.getActiveContext(selectionText);
       const nextAction: PendingSelectionAction = {
         id: randomId(),
-        action,
+        action: template.id,
+        templateId: template.id,
+        templateTitle: template.title,
         selectionText,
-        promptText: SELECTION_ACTION_PROMPTS[action](selectionText),
+        promptText: renderPageTaskPrompt(template, context),
         createdAt: now(),
       };
 

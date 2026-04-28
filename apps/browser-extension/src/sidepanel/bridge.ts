@@ -2,11 +2,14 @@ import { EXTENSION_STORAGE_KEYS, createDaemonBaseUrl } from "@browser-acp/config
 import type {
   AgentSpec,
   AgentSpecCandidate,
+  BrowserContextTimelineEntry,
   BrowserContextBundle,
   ConversationSummary,
   ExternalAgentSpecInput,
   ExternalAgentSpecPatch,
+  ModelState,
   NativeHostBootstrapResponse,
+  PageTaskTemplate,
   PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
@@ -70,6 +73,15 @@ export function createChromeBridge(): AgentConsoleHost {
       }),
     listSessions: async () => sendMessage({ type: "browser-acp/list-sessions" }),
     getActiveContext: async () => sendMessage({ type: "browser-acp/get-active-context" }),
+    listPageTaskTemplates: async () =>
+      sendMessage<PageTaskTemplate[]>({ type: "browser-acp/list-page-task-templates" }),
+    updatePageTaskTemplates: async (templates: PageTaskTemplate[]) =>
+      sendMessage<{ ok: true }>({
+        type: "browser-acp/update-page-task-templates",
+        templates,
+      }),
+    listContextHistory: async () =>
+      sendMessage<BrowserContextTimelineEntry[]>({ type: "browser-acp/list-context-history" }),
     subscribeToActiveContext(onContext: (context: BrowserContextBundle) => void) {
       const listener = (message: BackgroundRuntimeMessage) => {
         if (message.type === "browser-acp/context-changed") {
@@ -119,6 +131,33 @@ export function createChromeBridge(): AgentConsoleHost {
         type: "browser-acp/create-session",
         agentId,
         context,
+      }),
+    renameSession: async (sessionId: string, title: string) =>
+      sendMessage<ConversationSummary>({
+        type: "browser-acp/rename-session",
+        sessionId,
+        title,
+      }),
+    deleteSession: async (sessionId: string) =>
+      sendMessage<{ ok: true }>({
+        type: "browser-acp/delete-session",
+        sessionId,
+      }),
+    getAgentModels: async (agentId: string) =>
+      sendMessage<ModelState | null>({
+        type: "browser-acp/get-agent-models",
+        agentId,
+      }),
+    getSessionModels: async (sessionId: string) =>
+      sendMessage<ModelState | null>({
+        type: "browser-acp/get-session-models",
+        sessionId,
+      }),
+    setSessionModel: async (sessionId: string, modelId: string) =>
+      sendMessage<ModelState | null>({
+        type: "browser-acp/set-session-model",
+        sessionId,
+        modelId,
       }),
     connectSession: (
       sessionId: string,

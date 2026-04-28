@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, appendFile, rename } from "node:fs/promises";
+import { mkdir, readFile, writeFile, appendFile, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ConversationSummary, SessionEvent } from "@browser-acp/shared-types";
@@ -19,6 +19,11 @@ export class SessionStore {
     return this.summaryWriteQueue;
   }
 
+  async deleteSummary(sessionId: string): Promise<void> {
+    this.summaryWriteQueue = this.summaryWriteQueue.then(() => this.deleteSummaryNow(sessionId));
+    return this.summaryWriteQueue;
+  }
+
   async listSummaries(): Promise<ConversationSummary[]> {
     await this.summaryWriteQueue;
     return this.readSummaries();
@@ -35,6 +40,19 @@ export class SessionStore {
     await this.writeSummaries(next);
   }
 
+  private async deleteSummaryNow(sessionId: string): Promise<void> {
+    await this.ensureStorage();
+
+    const existing = await this.readSummaries();
+    const next = existing.filter((entry) => entry.id !== sessionId);
+    await this.writeSummaries(next);
+    await unlink(this.getTranscriptPath(sessionId)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    });
+  }
+
   private async readSummaries(): Promise<ConversationSummary[]> {
     await this.ensureStorage();
 
@@ -43,7 +61,7 @@ export class SessionStore {
     }
 
     const raw = await readFile(this.sessionsIndexPath, "utf8");
-    return JSON.parse(raw) as ConversationSummary[];
+    return (JSON.parse(raw) as unknown[]).map((entry) => sanitizeConversationSummary(entry));
   }
 
   private async writeSummaries(summaries: ConversationSummary[]): Promise<void> {
@@ -77,7 +95,7 @@ export class SessionStore {
     return raw
       .split("\n")
       .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as SessionEvent);
+      .map((line) => sanitizeSessionEvent(JSON.parse(line)));
   }
 
   private async ensureStorage(): Promise<void> {
@@ -88,4 +106,22 @@ export class SessionStore {
   private getTranscriptPath(sessionId: string): string {
     return join(this.sessionsDir, `${sessionId}.jsonl`);
   }
+}
+
+function sanitizeSessionEvent(value: unknown): SessionEvent {
+  const event = value as SessionEvent;
+  if (event.type !== "session.started") {
+    return event;
+  }
+
+  return {
+    ...event,
+    summary: sanitizeConversationSummary(event.summary),
+  };
+}
+
+function sanitizeConversationSummary(value: unknown): ConversationSummary {
+  const summary = value as ConversationSummary & { models?: unknown };
+  const { models: _models, ...rest } = summary;
+  return rest;
 }

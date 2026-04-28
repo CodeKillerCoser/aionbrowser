@@ -2,7 +2,7 @@ export type SessionSocketStatus = "idle" | "connecting" | "open" | "closed" | "e
 export type SessionSocketCallbackStatus = "open" | "close" | "error" | string;
 
 export function isSessionSocketUnavailable(hasSocket: boolean, status: SessionSocketStatus): boolean {
-  return !hasSocket || status === "closed" || status === "error";
+  return !hasSocket || status !== "open";
 }
 
 export function getNextSessionSocketStatus(

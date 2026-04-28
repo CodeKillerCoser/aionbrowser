@@ -2,10 +2,13 @@ import type {
   AgentSpec,
   AgentSpecCandidate,
   BrowserContextBundle,
+  BrowserContextTimelineEntry,
   DebugLogEntry,
   ExternalAgentSpecInput,
   ExternalAgentSpecPatch,
   NativeHostBootstrapResponse,
+  PageTaskTemplate,
+  ModelState,
 } from "@browser-acp/shared-types";
 
 export interface PageContextPayload {
@@ -16,11 +19,13 @@ export interface PageContextPayload {
   hasFocus: boolean;
 }
 
-export type SelectionActionType = "explain" | "search" | "examples";
+export type SelectionActionType = string;
 
 export interface PendingSelectionAction {
   id: string;
   action: SelectionActionType;
+  templateId: string;
+  templateTitle: string;
   selectionText: string;
   promptText: string;
   createdAt: string;
@@ -36,6 +41,7 @@ export interface BackgroundDebugState {
   daemonStatus: NativeHostBootstrapResponse | null;
   daemonLogs: DebugLogEntry[];
   logs: BackgroundDebugLogEntry[];
+  contextHistory?: BrowserContextTimelineEntry[];
 }
 
 export type BackgroundRequest =
@@ -78,13 +84,46 @@ export type BackgroundRequest =
       type: "browser-acp/get-debug-state";
     }
   | {
+      type: "browser-acp/list-page-task-templates";
+    }
+  | {
+      type: "browser-acp/update-page-task-templates";
+      templates: PageTaskTemplate[];
+    }
+  | {
+      type: "browser-acp/list-context-history";
+    }
+  | {
       type: "browser-acp/create-session";
       agentId: string;
       context: BrowserContextBundle;
     }
   | {
+      type: "browser-acp/rename-session";
+      sessionId: string;
+      title: string;
+    }
+  | {
+      type: "browser-acp/delete-session";
+      sessionId: string;
+    }
+  | {
+      type: "browser-acp/get-agent-models";
+      agentId: string;
+    }
+  | {
+      type: "browser-acp/get-session-models";
+      sessionId: string;
+    }
+  | {
+      type: "browser-acp/set-session-model";
+      sessionId: string;
+      modelId: string;
+    }
+  | {
       type: "browser-acp/trigger-selection-action";
-      action: SelectionActionType;
+      templateId?: string;
+      action?: SelectionActionType;
       selectionText: string;
     }
   | {
@@ -93,6 +132,7 @@ export type BackgroundRequest =
 
 export type AgentSpecResponse = AgentSpec;
 export type AgentSpecCandidateResponse = AgentSpecCandidate;
+export type SessionModelsResponse = ModelState | null;
 
 export type BackgroundRuntimeMessage =
   | {
@@ -101,4 +141,8 @@ export type BackgroundRuntimeMessage =
     }
   | {
       type: "browser-acp/selection-action-ready";
+    }
+  | {
+      type: "browser-acp/page-task-templates-changed";
+      templates: PageTaskTemplate[];
     };

@@ -5,6 +5,7 @@ export {
 export {
   AgentSpecCandidateRow,
   ConfiguredAgentSpecRow,
+  PageTaskTemplateRow,
 } from "./AgentSettingsRows";
 
 export {

@@ -80,6 +80,21 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
         return;
       }
 
+      const agentModelMatch = url.pathname.match(/^\/agents\/([^/]+)\/model$/);
+      if (agentModelMatch && method === "GET") {
+        const agentId = decodeURIComponent(agentModelMatch[1]);
+        const agents = await options.listAgents();
+        const agent = agents.find((entry) => entry.id === agentId);
+
+        if (!agent) {
+          writeJson(response, 404, { error: `Agent ${agentId} not found` });
+          return;
+        }
+
+        writeJson(response, 200, await sessions.getAgentModels(agent));
+        return;
+      }
+
       if (method === "GET" && url.pathname === "/agent-specs") {
         writeJson(response, 200, await agentSpecStore.list());
         return;
@@ -144,6 +159,53 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
         });
 
         writeJson(response, 200, summary);
+        return;
+      }
+
+      const sessionMatch = url.pathname.match(/^\/sessions\/([^/]+)$/);
+      if (sessionMatch && method === "PATCH") {
+        const body = await readJsonBody(request) as { title?: unknown };
+        if (typeof body.title !== "string" || body.title.trim().length === 0) {
+          writeJson(response, 400, { error: "Missing title" });
+          return;
+        }
+
+        writeJson(
+          response,
+          200,
+          await sessions.rename(decodeURIComponent(sessionMatch[1]), body.title),
+        );
+        return;
+      }
+
+      if (sessionMatch && method === "DELETE") {
+        await sessions.delete(decodeURIComponent(sessionMatch[1]));
+        writeJson(response, 200, { ok: true });
+        return;
+      }
+
+      const sessionModelMatch = url.pathname.match(/^\/sessions\/([^/]+)\/model$/);
+      if (sessionModelMatch && method === "GET") {
+        writeJson(
+          response,
+          200,
+          await sessions.getModels(decodeURIComponent(sessionModelMatch[1])),
+        );
+        return;
+      }
+
+      if (sessionModelMatch && method === "PUT") {
+        const body = await readJsonBody(request) as { modelId?: unknown };
+        if (typeof body.modelId !== "string" || body.modelId.length === 0) {
+          writeJson(response, 400, { error: "Missing modelId" });
+          return;
+        }
+
+        writeJson(
+          response,
+          200,
+          await sessions.setModel(decodeURIComponent(sessionModelMatch[1]), body.modelId),
+        );
         return;
       }
 

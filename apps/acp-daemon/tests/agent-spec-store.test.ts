@@ -136,4 +136,43 @@ describe("AgentSpecStore and AgentRegistry", () => {
     });
     expect(() => JSON.parse(readFileSync(configPath, "utf8"))).not.toThrow();
   });
+
+  it("migrates the obsolete GitHub Copilot npx ACP launch command", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-agent-specs-"));
+    tempDirs.push(rootDir);
+    const configPath = join(rootDir, "agent-specs.json");
+    const store = new AgentSpecStore(rootDir);
+
+    writeFileSync(
+      configPath,
+      JSON.stringify([
+        {
+          id: "external-github-copilot",
+          name: "GitHub Copilot",
+          kind: "external-acp",
+          enabled: true,
+          launch: {
+            command: "npx",
+            args: ["@github/copilot", "--acp"],
+          },
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+        },
+      ], null, 2),
+      "utf8",
+    );
+
+    const specs = await store.list();
+
+    expect(specs[0]).toMatchObject({
+      launch: {
+        command: "copilot",
+        args: ["--acp", "--stdio"],
+      },
+    });
+    expect(JSON.parse(readFileSync(configPath, "utf8"))[0].launch).toEqual({
+      command: "copilot",
+      args: ["--acp", "--stdio"],
+    });
+  });
 });
