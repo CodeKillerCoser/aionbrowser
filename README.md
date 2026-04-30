@@ -14,7 +14,7 @@ The project is currently a macOS/Chrome first release.
 - Configure page task templates for common selection actions.
 - Inspect daemon, panel, session, and raw ACP logs from the debug drawer.
 
-## Install From Source
+## Install
 
 Prerequisites:
 
@@ -23,26 +23,36 @@ Prerequisites:
 - Node.js 20 or newer
 - pnpm 9
 
-Clone and build:
+Browser ACP has two pieces:
+
+- A Chrome extension, loaded from the release zip.
+- A local Native Messaging host, required because Chrome extensions cannot start local CLI tools directly.
+
+### Load the Extension
+
+GitHub releases include `browser-acp-extension.zip`, which contains the built Chrome extension.
+
+Download it, unzip it, then:
+
+1. Open `chrome://extensions/`.
+2. Enable Developer mode.
+3. Click Load unpacked.
+4. Select the unzipped extension folder.
+5. Keep the generated extension ID handy for the native host step.
+
+At this point the side panel can load, but it cannot talk to local agents until the native host is installed.
+
+### Install the Native Host
+
+The native host is the small local bridge that Chrome is allowed to launch through Native Messaging. It starts the Browser ACP daemon, and the daemon starts ACP-compatible CLI agents.
+
+For `v0.1.0`, the release does not yet include a standalone native host installer. Install it from this repository:
 
 ```bash
 git clone https://github.com/CodeKillerCoser/aionbrowser.git
 cd aionbrowser
 pnpm install
 pnpm build
-```
-
-Load the extension:
-
-1. Open `chrome://extensions/`.
-2. Enable Developer mode.
-3. Click Load unpacked.
-4. Select `apps/browser-extension/dist`.
-5. Keep the generated extension ID handy if the native host installer cannot discover it automatically.
-
-Install the native host:
-
-```bash
 pnpm install:native-host
 ```
 
@@ -59,17 +69,22 @@ The installer writes:
 
 After installing the native host, reload the extension from `chrome://extensions/`, open the Browser ACP side panel, and select an agent.
 
-## Release Zip
+## Build From Source
 
-GitHub releases include `browser-acp-extension.zip`, which contains the built Chrome extension. Download it, unzip it, and load the unzipped folder with Chrome's Load unpacked flow.
-
-The native host still needs to be installed from this repository for the first release:
+If you want to build the extension yourself instead of using the release zip:
 
 ```bash
+git clone https://github.com/CodeKillerCoser/aionbrowser.git
+cd aionbrowser
 pnpm install
 pnpm build
-pnpm install:native-host
 ```
+
+Then load `apps/browser-extension/dist` with Chrome's Load unpacked flow.
+
+## Packaging Status
+
+The current release zip is the browser extension only. A future release should ship a one-command macOS native host installer so users do not need to clone the repository just to register the local bridge.
 
 ## Agent Setup
 
