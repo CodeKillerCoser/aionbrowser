@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { chmod, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BROWSER_ACP_EXTENSION_DISPLAY_NAME,
@@ -30,6 +30,8 @@ interface InstallManifestOptions {
   extensionIds?: string[];
   chromeRoot?: string;
   hostRootDir?: string;
+  manifestDir?: string;
+  nativeHostEntry?: string;
   nodePath?: string;
 }
 
@@ -121,7 +123,7 @@ export async function installChromeNativeHost(
   manifestPath: string;
 }> {
   const currentDir = dirname(fileURLToPath(import.meta.url));
-  const nativeHostEntry = resolve(currentDir, "../dist/index.js");
+  const nativeHostEntry = options.nativeHostEntry ?? resolveNativeHostEntry(currentDir);
   if (!existsSync(nativeHostEntry)) {
     throw new Error("Native host dist/index.js is missing. Run pnpm build before installing the native host.");
   }
@@ -142,7 +144,11 @@ export async function installChromeNativeHost(
   }
 
   const hostRootDir = options.hostRootDir ?? resolveBrowserAcpRootDir();
-  const manifestDir = resolveChromeNativeMessagingHostsDir();
+  const manifestDir = options.manifestDir ?? resolveChromeNativeMessagingHostsDir();
+  const installedNativeHostEntry = await installPackagedNativeHostFiles({
+    hostRootDir,
+    nativeHostEntry,
+  });
   const launcherPath = join(hostRootDir, "bin", NATIVE_HOST_NAME);
   const manifestPath = join(manifestDir, `${NATIVE_HOST_NAME}.json`);
   const nodePath = options.nodePath ?? process.execPath;
@@ -151,7 +157,7 @@ export async function installChromeNativeHost(
   await mkdir(manifestDir, { recursive: true });
 
   const launcherSource = createLauncherScript({
-    entryPath: nativeHostEntry,
+    entryPath: installedNativeHostEntry,
     nodePath,
   });
 
@@ -170,6 +176,34 @@ export async function installChromeNativeHost(
     launcherPath,
     manifestPath,
   };
+}
+
+function resolveNativeHostEntry(currentDir: string): string {
+  const packagedHost = resolve(currentDir, "native-host/host.mjs");
+  if (existsSync(packagedHost)) {
+    return packagedHost;
+  }
+
+  return resolve(currentDir, "../dist/index.js");
+}
+
+async function installPackagedNativeHostFiles({
+  hostRootDir,
+  nativeHostEntry,
+}: {
+  hostRootDir: string;
+  nativeHostEntry: string;
+}): Promise<string> {
+  const daemonEntry = join(dirname(nativeHostEntry), "daemon.mjs");
+  if (basename(nativeHostEntry) !== "host.mjs" || !existsSync(daemonEntry)) {
+    return nativeHostEntry;
+  }
+
+  const installDir = join(hostRootDir, "native-host");
+  await mkdir(installDir, { recursive: true });
+  await cp(nativeHostEntry, join(installDir, "host.mjs"));
+  await cp(daemonEntry, join(installDir, "daemon.mjs"));
+  return join(installDir, "host.mjs");
 }
 
 function createLauncherScript({

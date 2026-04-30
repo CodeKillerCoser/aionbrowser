@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildDaemonEntryFingerprint, ensureDaemonRunning } from "../src/daemonBootstrap.js";
+import { buildDaemonEntryFingerprint, ensureDaemonRunning, resolveDaemonEntryFromDir } from "../src/daemonBootstrap.js";
 import { buildDaemonEnvironment } from "../src/daemonBootstrap.js";
 import { loadLoginShellEnvironment } from "../src/daemonBootstrap.js";
 
@@ -140,6 +140,22 @@ describe("buildDaemonEntryFingerprint", () => {
     );
 
     expect(second).not.toBe(first);
+  });
+});
+
+describe("resolveDaemonEntryFromDir", () => {
+  it("uses a packaged daemon next to the bundled native host", () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-native-host-entry-"));
+    tempDirs.push(rootDir);
+    const currentDir = join(rootDir, "native-host");
+    mkdirSync(currentDir, { recursive: true });
+    const daemonEntry = join(currentDir, "daemon.mjs");
+    writeFileSync(daemonEntry, "console.log('daemon');", "utf8");
+
+    expect(resolveDaemonEntryFromDir(currentDir)).toEqual({
+      command: process.execPath,
+      args: [daemonEntry],
+    });
   });
 });
 

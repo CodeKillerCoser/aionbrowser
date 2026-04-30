@@ -4,6 +4,7 @@ dist
 coverage
 .wxt
 .worktrees
+.release
 *.log
 browser-acp-extension.zip
 apps/browser-extension/.output

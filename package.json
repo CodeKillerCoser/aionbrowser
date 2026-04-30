@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.15.2",
   "scripts": {
     "build": "pnpm -r build",
+    "package:release": "pnpm build && node scripts/package-release.mjs",
     "install:native-host": "pnpm --filter @browser-acp/native-host install:chrome-host",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "esbuild": "^0.28.0",
     "typescript": "^5.8.3"
   }
 }

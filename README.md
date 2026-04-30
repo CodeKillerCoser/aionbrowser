@@ -23,14 +23,14 @@ Prerequisites:
 - Node.js 20 or newer
 - pnpm 9
 
-Browser ACP has two pieces:
+The release zip contains two pieces:
 
-- A Chrome extension, loaded from the release zip.
+- A Chrome extension.
 - A local Native Messaging host, required because Chrome extensions cannot start local CLI tools directly.
 
 ### Load the Extension
 
-GitHub releases include `browser-acp-extension.zip`, which contains the built Chrome extension.
+GitHub releases include `browser-acp-extension.zip`, which contains the built Chrome extension and the packaged native host.
 
 Download it, unzip it, then:
 
@@ -38,7 +38,7 @@ Download it, unzip it, then:
 2. Enable Developer mode.
 3. Click Load unpacked.
 4. Select the unzipped extension folder.
-5. Keep the generated extension ID handy for the native host step.
+5. Keep the generated extension ID handy if the native host installer asks for it.
 
 At this point the side panel can load, but it cannot talk to local agents until the native host is installed.
 
@@ -46,24 +46,21 @@ At this point the side panel can load, but it cannot talk to local agents until 
 
 The native host is the small local bridge that Chrome is allowed to launch through Native Messaging. It starts the Browser ACP daemon, and the daemon starts ACP-compatible CLI agents.
 
-For `v0.1.0`, the release does not yet include a standalone native host installer. Install it from this repository:
+Run the installer from the unzipped release folder:
 
 ```bash
-git clone https://github.com/CodeKillerCoser/aionbrowser.git
-cd aionbrowser
-pnpm install
-pnpm build
-pnpm install:native-host
+./install-native-host.command
 ```
 
 If Chrome has not written extension preferences yet, pass the extension ID explicitly:
 
 ```bash
-pnpm --filter @browser-acp/native-host install:chrome-host -- --extension-id <extension-id>
+./install-native-host.command --extension-id <extension-id>
 ```
 
 The installer writes:
 
+- Packaged native host files: `~/Library/Application Support/browser-acp/native-host`
 - Native host launcher: `~/Library/Application Support/browser-acp/bin/com.browser_acp.host`
 - Chrome native messaging manifest: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.browser_acp.host.json`
 
@@ -84,7 +81,7 @@ Then load `apps/browser-extension/dist` with Chrome's Load unpacked flow.
 
 ## Packaging Status
 
-The current release zip is the browser extension only. A future release should ship a one-command macOS native host installer so users do not need to clone the repository just to register the local bridge.
+The current release zip is a macOS/Chrome unpacked-extension package. It includes the extension, the native host bundle, and `install-native-host.command`. A future release may add a signed macOS installer, but cloning the repository is no longer required for normal installation.
 
 ## Agent Setup
 

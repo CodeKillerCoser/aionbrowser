@@ -291,6 +291,18 @@ export async function loadLoginShellEnvironment(
 
 function resolveDaemonEntry(): DaemonEntry {
   const currentDir = dirname(fileURLToPath(import.meta.url));
+  return resolveDaemonEntryFromDir(currentDir);
+}
+
+export function resolveDaemonEntryFromDir(currentDir: string): DaemonEntry {
+  const packagedDaemon = resolve(currentDir, "daemon.mjs");
+  if (existsSync(packagedDaemon)) {
+    return {
+      command: process.execPath,
+      args: [packagedDaemon],
+    };
+  }
+
   const daemonDist = resolve(currentDir, "../../acp-daemon/dist/index.js");
   if (existsSync(daemonDist)) {
     return {
