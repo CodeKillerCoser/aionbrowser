@@ -1,4 +1,5 @@
 import type {
+  AgentAuthStatus,
   BrowserContextBundle,
   ConversationSummary,
   ModelState,
@@ -32,6 +33,16 @@ export function createSessionService(deps: { manager: SessionManager }) {
     },
     getAgentModels(agent: ResolvedAgent): Promise<ModelState | null> {
       return deps.manager.getAgentModels(agent);
+    },
+    getAgentAuthStatus(agent: ResolvedAgent): Promise<AgentAuthStatus> {
+      return deps.manager.getAgentAuthStatus(agent);
+    },
+    authenticateAgent(
+      agent: ResolvedAgent,
+      methodId?: string,
+      env?: Record<string, string>,
+    ): Promise<AgentAuthStatus> {
+      return deps.manager.authenticateAgent(agent, methodId, env);
     },
     sendPrompt(prompt: PromptEnvelope) {
       return deps.manager.sendPrompt(prompt);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, openSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:net";
@@ -21,6 +21,11 @@ interface DaemonState {
   token: string;
   pid: number;
   daemonFingerprint?: string;
+}
+
+interface DaemonEntry {
+  command: string;
+  args: string[];
 }
 
 interface StartDaemonInput {
@@ -284,7 +289,7 @@ export async function loadLoginShellEnvironment(
   }
 }
 
-function resolveDaemonEntry(): { command: string; args: string[] } {
+function resolveDaemonEntry(): DaemonEntry {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const daemonDist = resolve(currentDir, "../../acp-daemon/dist/index.js");
   if (existsSync(daemonDist)) {
@@ -303,22 +308,79 @@ function resolveDaemonEntry(): { command: string; args: string[] } {
 
 async function getDaemonEntryFingerprint(): Promise<string> {
   const daemonEntry = resolveDaemonEntry();
-  const entryKey = [daemonEntry.command, ...daemonEntry.args].join("\0");
-  const executablePath = daemonEntry.args.find((arg) => arg.endsWith(".js") || arg.endsWith(".ts"));
+  return buildDaemonEntryFingerprint(daemonEntry);
+}
 
-  if (!executablePath) {
+export async function buildDaemonEntryFingerprint(daemonEntry: DaemonEntry, extraFilePaths?: string[]): Promise<string> {
+  const entryKey = [daemonEntry.command, ...daemonEntry.args].join("\0");
+  const filePaths = extraFilePaths ?? await resolveDaemonFingerprintFiles(daemonEntry);
+
+  if (filePaths.length === 0) {
     return entryKey;
   }
 
+  const fileFingerprints = await Promise.all(filePaths.map(createFileFingerprint));
+  return [
+    entryKey,
+    ...fileFingerprints.filter((fingerprint): fingerprint is string => Boolean(fingerprint)),
+  ].join("\0");
+}
+
+async function resolveDaemonFingerprintFiles(daemonEntry: DaemonEntry): Promise<string[]> {
+  const executablePath = daemonEntry.args.find((arg) => arg.endsWith(".js") || arg.endsWith(".ts"));
+  if (!executablePath) {
+    return [];
+  }
+
+  const repoRoot = resolveRepoRootFromDaemonEntry(executablePath);
+  const dependencyDistDirs = repoRoot
+    ? [
+      join(repoRoot, "packages/runtime-node/dist"),
+      join(repoRoot, "packages/runtime-core/dist"),
+      join(repoRoot, "packages/shared-types/dist"),
+      join(repoRoot, "packages/config/dist"),
+    ]
+    : [];
+  const dependencyFiles = (await Promise.all(dependencyDistDirs.map(collectJavaScriptFiles))).flat();
+
+  return Array.from(new Set([executablePath, ...dependencyFiles])).sort();
+}
+
+function resolveRepoRootFromDaemonEntry(executablePath: string): string | null {
+  const candidate = resolve(dirname(executablePath), "../../..");
+  if (existsSync(join(candidate, "apps/acp-daemon")) && existsSync(join(candidate, "packages"))) {
+    return candidate;
+  }
+
+  return null;
+}
+
+async function collectJavaScriptFiles(dirPath: string): Promise<string[]> {
   try {
-    const fileStat = await stat(executablePath);
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    const nested = await Promise.all(entries.map(async (entry) => {
+      const entryPath = join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        return collectJavaScriptFiles(entryPath);
+      }
+      return entry.isFile() && entry.name.endsWith(".js") ? [entryPath] : [];
+    }));
+    return nested.flat();
+  } catch {
+    return [];
+  }
+}
+
+async function createFileFingerprint(filePath: string): Promise<string | null> {
+  try {
+    const fileStat = await stat(filePath);
     return [
-      entryKey,
+      filePath,
       String(fileStat.size),
       String(fileStat.mtimeMs),
     ].join("\0");
   } catch {
-    return entryKey;
+    return null;
   }
 }
 

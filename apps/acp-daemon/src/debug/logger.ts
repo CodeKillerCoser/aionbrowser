@@ -2,6 +2,8 @@ import type { DebugLogEntry } from "@browser-acp/shared-types";
 
 const LOG_LIMIT = 200;
 const STRING_LOG_LIMIT = 5000;
+const DEBUG_VALUE_DEPTH_LIMIT = 8;
+const DEBUG_VALUE_ENTRY_LIMIT = 40;
 
 export interface DebugLogger {
   log(scope: string, message: string, details?: unknown): void;
@@ -56,17 +58,19 @@ function sanitizeDebugValue(value: unknown, depth = 0): unknown {
     };
   }
 
-  if (depth >= 3) {
+  if (depth >= DEBUG_VALUE_DEPTH_LIMIT) {
     return "[MaxDepth]";
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, 20).map((entry) => sanitizeDebugValue(entry, depth + 1));
+    return value.slice(0, DEBUG_VALUE_ENTRY_LIMIT).map((entry) => sanitizeDebugValue(entry, depth + 1));
   }
 
   if (typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).slice(0, 20).map(([key, entryValue]) => [key, sanitizeDebugValue(entryValue, depth + 1)]),
+      Object.entries(value)
+        .slice(0, DEBUG_VALUE_ENTRY_LIMIT)
+        .map(([key, entryValue]) => [key, sanitizeDebugValue(entryValue, depth + 1)]),
     );
   }
 

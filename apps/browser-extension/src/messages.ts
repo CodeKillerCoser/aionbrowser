@@ -9,6 +9,7 @@ import type {
   NativeHostBootstrapResponse,
   PageTaskTemplate,
   ModelState,
+  AgentAuthStatus,
 } from "@browser-acp/shared-types";
 
 export interface PageContextPayload {
@@ -112,6 +113,16 @@ export type BackgroundRequest =
       agentId: string;
     }
   | {
+      type: "browser-acp/get-agent-auth-status";
+      agentId: string;
+    }
+  | {
+      type: "browser-acp/authenticate-agent";
+      agentId: string;
+      methodId?: string;
+      env?: Record<string, string>;
+    }
+  | {
       type: "browser-acp/get-session-models";
       sessionId: string;
     }
@@ -133,6 +144,7 @@ export type BackgroundRequest =
 export type AgentSpecResponse = AgentSpec;
 export type AgentSpecCandidateResponse = AgentSpecCandidate;
 export type SessionModelsResponse = ModelState | null;
+export type AgentAuthStatusResponse = AgentAuthStatus;
 
 export type BackgroundRuntimeMessage =
   | {

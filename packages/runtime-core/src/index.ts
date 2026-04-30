@@ -33,3 +33,7 @@ export type {
   RuntimeSessionCreateInput,
   RuntimeSessionLike,
 } from "./runtime.js";
+
+export {
+  RuntimeAuthenticationRequiredError,
+} from "./runtime.js";

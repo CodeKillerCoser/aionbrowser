@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentSpec,
+  AgentAuthStatus,
   BrowserContextBundle,
   ConversationSummary,
   ModelState,
@@ -105,6 +106,25 @@ const modelState: ModelState = {
       description: "Higher quality",
     },
   ],
+};
+
+const emptyModelState: ModelState = {
+  currentModelId: "",
+  availableModels: [],
+};
+
+const unauthenticatedStatus: AgentAuthStatus = {
+  state: "unauthenticated",
+  methods: [
+    {
+      id: "browser",
+      name: "Browser login",
+      description: "Open the agent login flow",
+      type: "agent",
+    },
+  ],
+  checkedAt: "2026-04-08T10:00:00.000Z",
+  error: "Authentication required",
 };
 
 const debugState: BackgroundDebugState = {
@@ -314,6 +334,271 @@ describe("BrowserAcpPanel", () => {
       expect(createSession).not.toHaveBeenCalled();
       expect(getAgentModels).toHaveBeenCalledWith("gemini-cli");
       expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("does not cache an empty agent model response", async () => {
+    const getAgentModels = vi.fn().mockImplementation((agentId: string) => {
+      if (agentId !== "gemini-cli") {
+        return Promise.resolve(modelState);
+      }
+
+      const geminiCallCount = getAgentModels.mock.calls.filter(([calledAgentId]) => calledAgentId === "gemini-cli").length;
+      return Promise.resolve(geminiCallCount === 1 ? emptyModelState : modelState);
+    });
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    await waitFor(() => {
+      expect(getAgentModels).toHaveBeenCalledWith("gemini-cli");
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "获取模型列表" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "获取模型列表" }));
+
+    await waitFor(() => {
+      expect(getAgentModels.mock.calls.filter(([agentId]) => agentId === "gemini-cli")).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("loads authentication choices when a model probe returns an empty model list", async () => {
+    const getAgentAuthStatus = vi.fn().mockResolvedValue(unauthenticatedStatus);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels: vi.fn().mockResolvedValue(emptyModelState),
+      getAgentAuthStatus,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+
+    await waitFor(() => {
+      expect(getAgentAuthStatus).toHaveBeenCalledWith("gemini-cli");
+      expect(screen.getByRole("button", { name: "选择登录方式" })).toBeInTheDocument();
+    });
+  });
+
+  it("shows login action when an agent requires authentication for models", async () => {
+    const getAgentAuthStatus = vi.fn().mockResolvedValue(unauthenticatedStatus);
+    const authenticateAgent = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      state: "authenticated",
+      models: modelState,
+    } satisfies AgentAuthStatus);
+    const getAgentModels = vi.fn().mockRejectedValue(new Error("Authentication required"));
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+      getAgentAuthStatus,
+      authenticateAgent,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    expect(await screen.findByRole("button", { name: "选择登录方式" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "选择登录方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browser login" }));
+
+    await waitFor(() => {
+      expect(getAgentAuthStatus).toHaveBeenCalledWith("gemini-cli");
+      expect(authenticateAgent).toHaveBeenCalledWith("gemini-cli", "browser");
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("clears the login spinner when OAuth finishes before the original request returns", async () => {
+    const getAgentAuthStatus = vi
+      .fn()
+      .mockResolvedValueOnce(unauthenticatedStatus)
+      .mockResolvedValue({
+        ...unauthenticatedStatus,
+        state: "authenticated",
+        methods: [],
+        models: modelState,
+      } satisfies AgentAuthStatus);
+    const authenticateAgent = vi.fn().mockImplementation(() => new Promise<AgentAuthStatus>(() => undefined));
+    const getAgentModels = vi.fn().mockRejectedValue(new Error("Authentication required"));
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels,
+      getAgentAuthStatus,
+      authenticateAgent,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(await screen.findByRole("button", { name: "选择登录方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browser login" }));
+
+    await waitFor(() => {
+      expect(getAgentAuthStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByRole("button", { name: "选择模型：Fast" })).toBeInTheDocument();
+    });
+  });
+
+  it("lets users pick an authentication method instead of always using the first one", async () => {
+    const getAgentAuthStatus = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      methods: [
+        {
+          id: "api-key",
+          name: "Use API key",
+          description: "Set GEMINI_API_KEY in the agent environment.",
+          type: "env_var",
+          vars: [
+            {
+              name: "GEMINI_API_KEY",
+              label: "Gemini API key",
+              secret: true,
+            },
+          ],
+        },
+        {
+          id: "oauth-personal",
+          name: "Log in with Google",
+          description: "Open the Google login flow.",
+          type: "agent",
+        },
+      ],
+    } satisfies AgentAuthStatus);
+    const authenticateAgent = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      state: "authenticated",
+      models: modelState,
+    } satisfies AgentAuthStatus);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels: vi.fn().mockRejectedValue(new Error("Authentication required")),
+      getAgentAuthStatus,
+      authenticateAgent,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(await screen.findByRole("button", { name: "选择登录方式" }));
+
+    expect(screen.getByText("GEMINI_API_KEY")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Log in with Google" }));
+
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("gemini-cli", "oauth-personal");
+    });
+  });
+
+  it("collects environment credentials before authenticating an API key method", async () => {
+    const getAgentAuthStatus = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      methods: [
+        {
+          id: "api-key",
+          name: "Use API key",
+          description: "Set GEMINI_API_KEY in the agent environment.",
+          type: "env_var",
+          vars: [
+            {
+              name: "GEMINI_API_KEY",
+              label: "Gemini API key",
+              secret: true,
+            },
+          ],
+        },
+      ],
+    } satisfies AgentAuthStatus);
+    const authenticateAgent = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      state: "authenticated",
+      models: modelState,
+    } satisfies AgentAuthStatus);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels: vi.fn().mockRejectedValue(new Error("Authentication required")),
+      getAgentAuthStatus,
+      authenticateAgent,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(await screen.findByRole("button", { name: "选择登录方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use API key" }));
+    fireEvent.change(screen.getByLabelText("Gemini API key"), {
+      target: { value: "secret-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加环境变量" }));
+    fireEvent.change(screen.getByLabelText("变量名 1"), {
+      target: { value: "GOOGLE_API_KEY" },
+    });
+    fireEvent.change(screen.getByLabelText("变量值 1"), {
+      target: { value: "manual-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认登录" }));
+
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("gemini-cli", "api-key", {
+        GEMINI_API_KEY: "secret-key",
+        GOOGLE_API_KEY: "manual-key",
+      });
+    });
+  });
+
+  it("opens the credential dialog for env var methods even when vars are empty", async () => {
+    const getAgentAuthStatus = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      methods: [
+        {
+          id: "api-key",
+          name: "Use API key",
+          description: "Add the required environment variables.",
+          type: "env_var",
+          vars: [],
+        },
+      ],
+    } satisfies AgentAuthStatus);
+    const authenticateAgent = vi.fn().mockResolvedValue({
+      ...unauthenticatedStatus,
+      state: "authenticated",
+      models: modelState,
+    } satisfies AgentAuthStatus);
+    const bridge = createBridge({
+      listSessions: vi.fn().mockResolvedValue([]),
+      getAgentModels: vi.fn().mockRejectedValue(new Error("Authentication required")),
+      getAgentAuthStatus,
+      authenticateAgent,
+    });
+
+    render(<BrowserAcpPanel bridge={bridge} />);
+
+    await screen.findByRole("button", { name: "Gemini CLI ready" });
+    fireEvent.click(await screen.findByRole("button", { name: "选择登录方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use API key" }));
+    expect(screen.getByRole("dialog", { name: "Use API key" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "添加环境变量" }));
+    fireEvent.change(screen.getByLabelText("变量名 1"), {
+      target: { value: "GEMINI_API_KEY" },
+    });
+    fireEvent.change(screen.getByLabelText("变量值 1"), {
+      target: { value: "manual-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认登录" }));
+
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("gemini-cli", "api-key", {
+        GEMINI_API_KEY: "manual-key",
+      });
     });
   });
 
@@ -1856,6 +2141,16 @@ function createBridge(overrides: Partial<BrowserAcpBridge> = {}): BrowserAcpBrid
     })),
     deleteSession: vi.fn().mockResolvedValue({ ok: true }),
     getAgentModels: vi.fn().mockResolvedValue(null),
+    getAgentAuthStatus: vi.fn().mockResolvedValue({
+      state: "unknown",
+      methods: [],
+      checkedAt: "2026-04-08T10:00:00.000Z",
+    } satisfies AgentAuthStatus),
+    authenticateAgent: vi.fn().mockResolvedValue({
+      state: "unknown",
+      methods: [],
+      checkedAt: "2026-04-08T10:00:00.000Z",
+    } satisfies AgentAuthStatus),
     getSessionModels: vi.fn().mockResolvedValue(null),
     setSessionModel: vi.fn().mockResolvedValue(null),
     connectSession: vi.fn().mockImplementation(() => ({

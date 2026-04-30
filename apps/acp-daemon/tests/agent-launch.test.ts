@@ -41,6 +41,28 @@ describe("agent launch instruction injection", () => {
     });
   });
 
+  it("sets Gemini selected auth type while launching an explicit auth flow", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-launch-"));
+    tempDirs.push(rootDir);
+
+    const launch = await prepareAgentLaunch({
+      agent: agent("gemini-cli", "Gemini CLI", "gemini", ["--experimental-acp"]),
+      cwd: rootDir,
+      authenticationMethodId: "oauth-personal",
+    });
+
+    const settingsPath = launch.env?.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+    expect(settingsPath).toBeTruthy();
+    expect(launch.authenticationHandledByLaunch).toBe(true);
+    expect(JSON.parse(readFileSync(settingsPath!, "utf8"))).toMatchObject({
+      security: {
+        auth: {
+          selectedType: "oauth-personal",
+        },
+      },
+    });
+  });
+
   it("adds Qwen context files through include directories and ACP settings", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-launch-"));
     tempDirs.push(rootDir);

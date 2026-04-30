@@ -35,10 +35,9 @@ describe("buildBuiltinAgentSpecCandidates", () => {
         }),
         expect.objectContaining({
           catalogId: "github-copilot-cli",
-          launchCommand: "copilot",
-          launchArgs: ["--acp", "--stdio"],
-          detectedCommandPath: "/opt/homebrew/bin/copilot",
-          status: "ready",
+          launchCommand: "npx",
+          launchArgs: ["@github/copilot-language-server", "--acp", "--stdio"],
+          status: "launchable",
           recommended: true,
         }),
       ]),

@@ -2,6 +2,7 @@ import { EXTENSION_STORAGE_KEYS, createDaemonBaseUrl } from "@browser-acp/config
 import type {
   AgentSpec,
   AgentSpecCandidate,
+  AgentAuthStatus,
   BrowserContextTimelineEntry,
   BrowserContextBundle,
   ConversationSummary,
@@ -147,6 +148,18 @@ export function createChromeBridge(): AgentConsoleHost {
       sendMessage<ModelState | null>({
         type: "browser-acp/get-agent-models",
         agentId,
+      }),
+    getAgentAuthStatus: async (agentId: string) =>
+      sendMessage<AgentAuthStatus>({
+        type: "browser-acp/get-agent-auth-status",
+        agentId,
+      }),
+    authenticateAgent: async (agentId: string, methodId?: string, env?: Record<string, string>) =>
+      sendMessage<AgentAuthStatus>({
+        type: "browser-acp/authenticate-agent",
+        agentId,
+        methodId,
+        env,
       }),
     getSessionModels: async (sessionId: string) =>
       sendMessage<ModelState | null>({

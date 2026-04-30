@@ -16,6 +16,18 @@ const registryEntries: AgentCatalogEntry[] = [
     }
   },
   {
+    id: "github-copilot-cli",
+    name: "GitHub Copilot",
+    description: "GitHub's AI pair programmer",
+    source: "registry",
+    distribution: {
+      type: "npx",
+      command: "npx",
+      args: ["@github/copilot-language-server", "--acp", "--stdio"],
+      packageName: "@github/copilot-language-server"
+    }
+  },
+  {
     id: "codex-cli",
     name: "Codex CLI",
     description: "ACP adapter for OpenAI's coding assistant",
@@ -131,6 +143,20 @@ describe("buildResolvedCatalog", () => {
       status: "launchable",
       launchCommand: "npx",
       launchArgs: ["@qoder-ai/qodercli", "--acp"],
+    });
+  });
+
+  it("uses the GitHub Copilot language server ACP entrypoint", () => {
+    const catalog = buildResolvedCatalog({
+      registryEntries,
+      userEntries: [],
+      availableCommands: new Set(["copilot", "npx"]),
+    });
+
+    expect(catalog.find((entry) => entry.id === "github-copilot-cli")).toMatchObject({
+      status: "launchable",
+      launchCommand: "npx",
+      launchArgs: ["@github/copilot-language-server", "--acp", "--stdio"],
     });
   });
 });

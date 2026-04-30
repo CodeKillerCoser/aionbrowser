@@ -1,6 +1,7 @@
 import type {
   AgentSpec,
   AgentSpecCandidate,
+  AgentAuthStatus,
   BrowserContextBundle,
   BrowserContextTimelineEntry,
   ConversationSummary,
@@ -44,6 +45,8 @@ export interface BackgroundRouterServices {
   renameSession(sessionId: string, title: string): Promise<ConversationSummary>;
   deleteSession(sessionId: string): Promise<{ ok: true }>;
   getAgentModels(agentId: string): Promise<ModelState | null>;
+  getAgentAuthStatus(agentId: string): Promise<AgentAuthStatus>;
+  authenticateAgent(agentId: string, methodId?: string, env?: Record<string, string>): Promise<AgentAuthStatus>;
   getSessionModels(sessionId: string): Promise<ModelState | null>;
   setSessionModel(sessionId: string, modelId: string): Promise<ModelState | null>;
   queueSelectionAction(
@@ -127,6 +130,14 @@ export function createBackgroundRouter(services: BackgroundRouterServices) {
 
       if (message.type === "browser-acp/get-agent-models") {
         return services.getAgentModels(message.agentId);
+      }
+
+      if (message.type === "browser-acp/get-agent-auth-status") {
+        return services.getAgentAuthStatus(message.agentId);
+      }
+
+      if (message.type === "browser-acp/authenticate-agent") {
+        return services.authenticateAgent(message.agentId, message.methodId, message.env);
       }
 
       if (message.type === "browser-acp/get-session-models") {

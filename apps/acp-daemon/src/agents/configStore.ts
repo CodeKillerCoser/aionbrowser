@@ -10,6 +10,10 @@ import type {
 } from "@browser-acp/shared-types";
 
 const AGENT_SPECS_FILE_NAME = "agent-specs.json";
+const GITHUB_COPILOT_LANGUAGE_SERVER_LAUNCH = {
+  command: "npx",
+  args: ["@github/copilot-language-server", "--acp", "--stdio"],
+};
 
 export class AgentSpecStore {
   private readonly configPath: string;
@@ -146,8 +150,8 @@ export class AgentSpecStore {
       return {
         ...spec,
         launch: {
-          command: "copilot",
-          args: ["--acp", "--stdio"],
+          command: GITHUB_COPILOT_LANGUAGE_SERVER_LAUNCH.command,
+          args: [...GITHUB_COPILOT_LANGUAGE_SERVER_LAUNCH.args],
         },
         updatedAt: new Date().toISOString(),
       };
@@ -161,13 +165,22 @@ export class AgentSpecStore {
 }
 
 function isObsoleteGitHubCopilotLaunch(spec: ExternalAcpAgentSpec): boolean {
-  return (
-    /github\s+copilot|copilot/i.test(spec.name) &&
+  if (!/github\s+copilot|copilot/i.test(spec.name)) {
+    return false;
+  }
+
+  const isObsoleteNpxPackage =
     spec.launch.command === "npx" &&
     spec.launch.args.length === 2 &&
     spec.launch.args[0] === "@github/copilot" &&
-    spec.launch.args[1] === "--acp"
-  );
+    spec.launch.args[1] === "--acp";
+  const isUnsupportedLocalCopilotAcp =
+    spec.launch.command === "copilot" &&
+    spec.launch.args.length === 2 &&
+    spec.launch.args[0] === "--acp" &&
+    spec.launch.args[1] === "--stdio";
+
+  return isObsoleteNpxPackage || isUnsupportedLocalCopilotAcp;
 }
 
 function tryParseJsonArrayPrefix(raw: string): AgentSpec[] | null {

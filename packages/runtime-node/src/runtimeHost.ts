@@ -8,18 +8,23 @@ export function createRuntimeHost(): RuntimeHost {
       const launch = await prepareAgentLaunch({
         agent: input.agent,
         cwd: input.cwd,
+        authenticationMethodId: input.runtime.authenticationMethodId,
       });
       return RuntimeSession.create({
         ...input.runtime,
         cwd: input.cwd,
         command: launch.command,
         args: launch.args,
-        env: launch.env,
+        env: {
+          ...launch.env,
+          ...input.runtime.env,
+        },
         newSessionAdditionalDirectories: launch.newSessionAdditionalDirectories,
         newSessionMeta: launch.newSessionMeta,
         newSessionSettings: launch.newSessionSettings,
         promptPrefix: launch.promptPrefix,
         resumeSessionId: input.resumeSessionId,
+        authenticationHandledByLaunch: launch.authenticationHandledByLaunch,
       });
     },
   };

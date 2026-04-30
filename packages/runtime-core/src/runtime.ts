@@ -1,4 +1,5 @@
 import type {
+  AuthMethodSummary,
   PermissionDecision,
   PromptEnvelope,
   ResolvedAgent,
@@ -25,11 +26,14 @@ export interface RuntimeSessionCreateInput {
   promptPrefix?: string;
   resumeSessionId?: string;
   allowAuthentication?: boolean;
+  authenticationMethodId?: string;
+  authenticationHandledByLaunch?: boolean;
   startupTimeoutMs?: number;
 }
 
 export interface RuntimeSessionLike {
   readonly sessionId: string;
+  getAuthMethods?(): AuthMethodSummary[];
   getModelState(): ModelState | null;
   setModel(modelId: string): Promise<ModelState | null>;
   prompt(prompt: PromptEnvelope, turnId: string): Promise<{ stopReason: string }>;
@@ -47,4 +51,17 @@ export interface RuntimeHostCreateInput {
 
 export interface RuntimeHost {
   create(input: RuntimeHostCreateInput): Promise<RuntimeSessionLike>;
+}
+
+export class RuntimeAuthenticationRequiredError extends Error {
+  readonly authMethods: AuthMethodSummary[];
+
+  constructor(authMethods: AuthMethodSummary[], cause?: unknown) {
+    super("Authentication required");
+    this.name = "RuntimeAuthenticationRequiredError";
+    this.authMethods = authMethods;
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
 }

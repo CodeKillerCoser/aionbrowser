@@ -5,12 +5,14 @@ import type { ResolvedAgent } from "@browser-acp/shared-types";
 interface PrepareAgentLaunchInput {
   agent: ResolvedAgent;
   cwd: string;
+  authenticationMethodId?: string;
 }
 
 export interface PreparedAgentLaunch {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  authenticationHandledByLaunch?: boolean;
   newSessionAdditionalDirectories?: string[];
   newSessionMeta?: Record<string, unknown>;
   newSessionSettings?: Record<string, unknown>;
@@ -53,6 +55,15 @@ export async function prepareAgentLaunch(input: PrepareAgentLaunchInput): Promis
         includeDirectories: [instructionRoot],
         loadMemoryFromIncludeDirectories: true,
       },
+      ...(input.authenticationMethodId
+        ? {
+            security: {
+              auth: {
+                selectedType: input.authenticationMethodId,
+              },
+            },
+          }
+        : {}),
     });
     return {
       command: input.agent.launchCommand,
@@ -63,6 +74,7 @@ export async function prepareAgentLaunch(input: PrepareAgentLaunchInput): Promis
       env: {
         GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsFile,
       },
+      authenticationHandledByLaunch: Boolean(input.authenticationMethodId),
     };
   }
 

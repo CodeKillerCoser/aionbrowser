@@ -297,6 +297,89 @@ describe("background behaviors", () => {
     });
   });
 
+  it("returns the daemon error message when a daemon request fails", async () => {
+    let runtimeMessageListener:
+      | ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (value: unknown) => void) => boolean)
+      | undefined;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: vi.fn().mockResolvedValue(JSON.stringify({ error: "Authentication required" })),
+      }),
+    );
+
+    vi.stubGlobal("chrome", {
+      sidePanel: {
+        open: vi.fn().mockResolvedValue(undefined),
+      },
+      action: {
+        onClicked: {
+          addListener: vi.fn(),
+        },
+      },
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({}),
+          set: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+      tabs: {
+        onActivated: {
+          addListener: vi.fn(),
+        },
+        onUpdated: {
+          addListener: vi.fn(),
+        },
+        query: vi.fn().mockResolvedValue([]),
+      },
+      scripting: {
+        executeScript: vi.fn(),
+      },
+      runtime: {
+        id: "test-extension",
+        lastError: undefined,
+        onMessage: {
+          addListener: vi.fn((listener) => {
+            runtimeMessageListener = listener;
+          }),
+        },
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+        sendNativeMessage: vi.fn((_host, _message, callback) => {
+          callback({
+            ok: true,
+            port: 60628,
+            token: "test-token",
+            pid: 100,
+          });
+        }),
+      },
+    });
+
+    await import("../src/background");
+
+    expect(runtimeMessageListener).toBeTypeOf("function");
+
+    const response = vi.fn();
+    runtimeMessageListener?.(
+      {
+        type: "browser-acp/get-agent-models",
+        agentId: "agent-requires-login",
+      },
+      {},
+      response,
+    );
+
+    await vi.waitFor(() => {
+      expect(response).toHaveBeenCalledWith({
+        ok: false,
+        error: "Authentication required",
+      });
+    });
+  });
+
   it("persists a pending selection action across a background restart before the panel claims it", async () => {
     let runtimeMessageListener:
       | ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (value: unknown) => void) => boolean)

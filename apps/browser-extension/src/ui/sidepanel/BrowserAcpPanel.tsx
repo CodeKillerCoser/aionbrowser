@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentAuthStatus,
   ConversationSummary,
   ModelState,
   PermissionDecision,
@@ -55,6 +56,36 @@ const MODEL_REQUEST_TIMEOUT_MS =
   typeof process !== "undefined" && process.env.NODE_ENV === "test"
     ? 20
     : 20 * 1000;
+const AUTH_STATUS_POLL_INTERVAL_MS =
+  typeof process !== "undefined" && process.env.NODE_ENV === "test"
+    ? 5
+    : 3 * 1000;
+const AUTH_STATUS_POLL_TIMEOUT_MS =
+  typeof process !== "undefined" && process.env.NODE_ENV === "test"
+    ? 100
+    : 10 * 60 * 1000;
+
+function hasAvailableModels(models: ModelState | null | undefined): models is ModelState {
+  return Boolean(models?.availableModels.length);
+}
+
+function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
 
 interface ModelLoadEntry {
   promise: Promise<ModelState | null>;
@@ -78,6 +109,8 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
   const [optimisticPrompts, setOptimisticPrompts] = useState<OptimisticPrompt[]>([]);
   const [modelChanging, setModelChanging] = useState(false);
   const [modelLoadingAgentIds, setModelLoadingAgentIds] = useState<string[]>([]);
+  const [authenticatingAgentIds, setAuthenticatingAgentIds] = useState<string[]>([]);
+  const [agentAuthStatuses, setAgentAuthStatuses] = useState<Record<string, AgentAuthStatus>>({});
   const [modelCacheVersion, setModelCacheVersion] = useState(0);
   const modelCacheRef = useRef(createModelCache());
   const modelLoadPromisesRef = useRef(new Map<string, ModelLoadEntry>());
@@ -177,7 +210,9 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
     return activeAgentId ? modelCacheRef.current.get(activeAgentId) : null;
   }, [activeAgentId, modelCacheVersion]);
   const activeModelLoading = Boolean(activeAgentId && modelLoadingAgentIds.includes(activeAgentId));
-  const modelBusy = activeModelLoading || modelChanging;
+  const activeAuthBusy = Boolean(activeAgentId && authenticatingAgentIds.includes(activeAgentId));
+  const activeAuthStatus = activeAgentId ? agentAuthStatuses[activeAgentId] ?? null : null;
+  const modelBusy = activeModelLoading || modelChanging || activeAuthBusy;
   const activeAgent = useMemo(
     () => findActiveAgent(agents, selectedSession, selectedAgentId),
     [agents, selectedAgentId, selectedSession],
@@ -396,6 +431,67 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
     });
   }
 
+  function markAgentAuthenticating(agentId: string, authenticating: boolean): void {
+    setAuthenticatingAgentIds((current) => {
+      if (authenticating) {
+        return current.includes(agentId) ? current : [...current, agentId];
+      }
+
+      return current.filter((id) => id !== agentId);
+    });
+  }
+
+  function rememberAgentAuthStatus(agentId: string, status: AgentAuthStatus): void {
+    setAgentAuthStatuses((current) => ({
+      ...current,
+      [agentId]: status,
+    }));
+    if (hasAvailableModels(status.models)) {
+      rememberModels(agentId, status.models);
+    }
+  }
+
+  async function loadAgentAuthStatus(agentId: string): Promise<AgentAuthStatus> {
+    const status = await bridge.getAgentAuthStatus(agentId);
+    rememberAgentAuthStatus(agentId, status);
+    recordPanelLog("agent auth status loaded", {
+      agentId,
+      state: status.state,
+      methodCount: status.methods.length,
+    });
+    return status;
+  }
+
+  async function waitForAgentAuthentication(agentId: string, signal: AbortSignal): Promise<AgentAuthStatus> {
+    const startedAt = Date.now();
+
+    while (!signal.aborted && Date.now() - startedAt < AUTH_STATUS_POLL_TIMEOUT_MS) {
+      await waitForDelay(AUTH_STATUS_POLL_INTERVAL_MS, signal);
+      if (signal.aborted) {
+        break;
+      }
+
+      try {
+        const status = await loadAgentAuthStatus(agentId);
+        if (status.state === "authenticated" || hasAvailableModels(status.models)) {
+          recordPanelLog("agent authentication observed via status polling", {
+            agentId,
+            state: status.state,
+            modelCount: status.models?.availableModels.length ?? 0,
+          });
+          return status;
+        }
+      } catch (pollError) {
+        recordPanelLog("agent authentication status poll failed", {
+          agentId,
+          error: pollError instanceof Error ? pollError.message : String(pollError),
+        });
+      }
+    }
+
+    throw new Error("登录仍未完成，请确认浏览器授权完成后重试。");
+  }
+
   async function loadAgentModelState(
     agentId: string,
     requestModels: () => Promise<ModelState | null>,
@@ -407,13 +503,11 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
       showEmptyError: boolean;
     },
   ): Promise<ModelState | null> {
-    if (modelCacheRef.current.has(agentId)) {
-      const cached = modelCacheRef.current.get(agentId);
-      if (showEmptyError && !cached?.availableModels.length) {
-        setError("当前 Agent 没有返回可切换的模型列表。");
-      }
+    const cached = modelCacheRef.current.get(agentId);
+    if (hasAvailableModels(cached)) {
       return cached;
     }
+    forgetModels(agentId);
 
     const pending = modelLoadPromisesRef.current.get(agentId);
     if (pending) {
@@ -447,8 +541,18 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
       try {
         const models = await requestModels();
         const isCurrentRequest = modelLoadPromisesRef.current.get(agentId)?.requestId === requestId;
-        if (isCurrentRequest || !modelCacheRef.current.has(agentId)) {
+        if (hasAvailableModels(models) && (isCurrentRequest || !modelCacheRef.current.has(agentId))) {
           rememberModels(agentId, models);
+        } else if (!hasAvailableModels(models)) {
+          forgetModels(agentId);
+          try {
+            await loadAgentAuthStatus(agentId);
+          } catch (authError) {
+            recordPanelLog("agent auth status load failed", {
+              agentId,
+              error: authError instanceof Error ? authError.message : String(authError),
+            });
+          }
         } else {
           recordPanelLog("stale model list load ignored", {
             source: logSource,
@@ -467,6 +571,16 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
         return models;
       } catch (modelError) {
         const isCurrentRequest = modelLoadPromisesRef.current.get(agentId)?.requestId === requestId;
+        if (isAuthenticationRequiredError(modelError)) {
+          try {
+            await loadAgentAuthStatus(agentId);
+          } catch (authError) {
+            recordPanelLog("agent auth status load failed", {
+              agentId,
+              error: authError instanceof Error ? authError.message : String(authError),
+            });
+          }
+        }
         if (showEmptyError && isCurrentRequest) {
           setError(modelError instanceof Error ? modelError.message : String(modelError));
         }
@@ -599,7 +713,63 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
     });
   }
 
+  async function handleAuthenticateAgent(methodId?: string, env?: Record<string, string>) {
+    if (!activeAgentId || activeAuthBusy) {
+      return;
+    }
+
+    const agentId = activeAgentId;
+    const authPollController = new AbortController();
+    markAgentAuthenticating(agentId, true);
+    setError(null);
+    try {
+      const authRequest = (env
+        ? bridge.authenticateAgent(agentId, methodId, env)
+        : bridge.authenticateAgent(agentId, methodId)).catch(async (authError) => {
+          try {
+            const status = await loadAgentAuthStatus(agentId);
+            if (status.state === "authenticated" || hasAvailableModels(status.models)) {
+              return status;
+            }
+          } catch (statusError) {
+            recordPanelLog("agent authentication status recovery failed", {
+              agentId,
+              error: statusError instanceof Error ? statusError.message : String(statusError),
+            });
+          }
+          throw authError;
+        });
+      const status = await Promise.race([
+        authRequest,
+        waitForAgentAuthentication(agentId, authPollController.signal),
+      ]);
+      rememberAgentAuthStatus(agentId, status);
+      recordPanelLog("agent authentication completed", {
+        agentId,
+        state: status.state,
+        modelCount: status.models?.availableModels.length ?? 0,
+      });
+      if (status.state !== "authenticated" && status.error) {
+        setError(status.error);
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : String(authError));
+      recordPanelLog("agent authentication failed", {
+        agentId,
+        error: authError instanceof Error ? authError.message : String(authError),
+      });
+    } finally {
+      authPollController.abort();
+      markAgentAuthenticating(agentId, false);
+    }
+  }
+
   function rememberModels(agentId: string, models: ModelState | null): void {
+    if (!hasAvailableModels(models)) {
+      forgetModels(agentId);
+      return;
+    }
+
     modelCacheRef.current.set(agentId, models);
     setModelCacheVersion((current) => current + 1);
 
@@ -615,6 +785,19 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
       setModelCacheVersion((current) => current + 1);
     }, MODEL_CACHE_TTL_MS + 1);
     modelCacheRefreshTimersRef.current.set(agentId, nextTimer);
+  }
+
+  function forgetModels(agentId: string): void {
+    const existingTimer = modelCacheRefreshTimersRef.current.get(agentId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      modelCacheRefreshTimersRef.current.delete(agentId);
+    }
+
+    if (modelCacheRef.current.has(agentId)) {
+      modelCacheRef.current.delete(agentId);
+      setModelCacheVersion((current) => current + 1);
+    }
   }
 
   const conversationTitle = getConversationTitle(selectedSession);
@@ -708,15 +891,25 @@ export function BrowserAcpPanel({ bridge }: { bridge: BrowserAcpBridge }) {
           isBusy={hasRunningTurn}
           models={activeModelState}
           modelBusy={modelBusy}
+          authStatus={activeAuthStatus}
+          authBusy={activeAuthBusy}
           canRequestModels={Boolean(hostReady && activeAgentId && (selectedSessionId || context))}
           placeholder="询问当前页面，或直接输入任务..."
           onChange={setDraft}
           onModelChange={(modelId) => void handleModelChange(modelId)}
           onRequestModels={() => void handleRequestModels()}
+          onAuthenticateAgent={(methodId, env) => void handleAuthenticateAgent(methodId, env)}
           onModelSelectorLog={(message, details) => recordPanelLog(message, details)}
           onSubmit={() => void handleComposerSubmit()}
         />
       </main>
     </div>
   );
+}
+
+function isAuthenticationRequiredError(error: unknown): boolean {
+  if (error instanceof Error) {
+    return error.message === "Authentication required" || error.message.includes("Authentication required");
+  }
+  return String(error).includes("Authentication required");
 }

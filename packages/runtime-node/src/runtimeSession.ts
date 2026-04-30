@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { Readable, Writable } from "node:stream";
+import { Readable, Transform, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type {
+  AuthEnvVarSummary,
+  AuthMethodSummary,
   PermissionDecision,
   PermissionOptionSummary,
   PromptEnvelope,
@@ -13,6 +15,7 @@ import type {
 import { createBrowserContextFileReference } from "./browserContextFiles.js";
 import {
   buildPromptText,
+  RuntimeAuthenticationRequiredError,
   type RuntimeDebugLogger,
   type RuntimeSessionCreateInput,
   type RuntimeSessionLike,
@@ -31,6 +34,7 @@ export class RuntimeSession implements RuntimeSessionLike {
     sessionId: string,
     private readonly agentSessionId: string,
     private modelState: ModelState | null,
+    private readonly authMethods: AuthMethodSummary[],
   ) {
     this.sessionId = sessionId;
   }
@@ -46,16 +50,23 @@ export class RuntimeSession implements RuntimeSessionLike {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         ...input.env,
       },
     });
-    registerChildDebugLogging(child, input.logger);
+    const stderrChunks: string[] = [];
+    registerChildDebugLogging(child, input.logger, stderrChunks);
+
+    const outboundAcpLog = createAcpPacketLoggingTransform("sent", input.logger);
+    const inboundAcpLog = createAcpPacketLoggingTransform("received", input.logger);
+    outboundAcpLog.pipe(child.stdin!);
+    child.stdout!.pipe(inboundAcpLog);
 
     const stream = acp.ndJsonStream(
-      Writable.toWeb(child.stdin!),
-      Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
+      Writable.toWeb(outboundAcpLog),
+      Readable.toWeb(inboundAcpLog) as ReadableStream<Uint8Array>,
     );
 
     const browserSessionId = input.resumeSessionId ?? "pending-session";
@@ -74,21 +85,32 @@ export class RuntimeSession implements RuntimeSessionLike {
             authMethodCount: initializeResponse.authMethods?.length ?? 0,
           });
 
-          return input.resumeSessionId
+          const authMethods = normalizeAuthMethods(initializeResponse.authMethods);
+          input.logger?.log("runtime", "runtime auth methods normalized", {
+            authMethods: authMethods.map((method) => ({
+              id: method.id,
+              type: method.type,
+              varNames: method.vars?.map((variable) => variable.name).join(", ") ?? null,
+            })),
+          });
+          const sessionResponse = input.resumeSessionId
             ? await restoreSession(connection, initializeResponse.agentCapabilities, initializeResponse.authMethods, input)
             : await createNewSession(connection, initializeResponse.authMethods, input);
+
+          return {
+            authMethods,
+            session: sessionResponse,
+          };
         })(),
         input.startupTimeoutMs,
         () => {
           input.logger?.log("runtime", "runtime session startup timed out", {
             timeoutMs: input.startupTimeoutMs,
           });
-          if (!child.killed) {
-            child.kill();
-          }
+          terminateRuntimeProcess(child, input.logger);
         },
       );
-      client.setBrowserSessionId(input.resumeSessionId ?? session.sessionId);
+      client.setBrowserSessionId(input.resumeSessionId ?? session.session.sessionId);
 
       return new RuntimeSession(
         child,
@@ -97,21 +119,25 @@ export class RuntimeSession implements RuntimeSessionLike {
         input.logger,
         input.cwd,
         input.promptPrefix,
-        input.resumeSessionId ?? session.sessionId,
-        session.sessionId,
-        normalizeModelState(session.models),
+        input.resumeSessionId ?? session.session.sessionId,
+        session.session.sessionId,
+        normalizeModelState(session.session.models),
+        session.authMethods,
       );
     } catch (error) {
-      input.logger?.log("runtime", "runtime session startup failed", error);
-      if (!child.killed) {
-        child.kill();
-      }
-      throw error;
+      const failure = enrichRuntimeError(error, stderrChunks);
+      input.logger?.log("runtime", "runtime session startup failed", failure);
+      terminateRuntimeProcess(child, input.logger);
+      throw failure;
     }
   }
 
   getModelState(): ModelState | null {
     return this.modelState;
+  }
+
+  getAuthMethods(): AuthMethodSummary[] {
+    return this.authMethods;
   }
 
   async setModel(modelId: string): Promise<ModelState | null> {
@@ -218,9 +244,7 @@ export class RuntimeSession implements RuntimeSessionLike {
       childKilled: this.child.killed,
     });
     await this.client.cancelPendingPermissions();
-    if (!this.child.killed) {
-      this.child.kill();
-    }
+    terminateRuntimeProcess(this.child, this.logger);
     await this.connection.closed.catch(() => undefined);
   }
 }
@@ -514,6 +538,7 @@ function toContentBlockSummary(content: acp.ContentBlock): ToolCallContentSummar
 function registerChildDebugLogging(
   child: ReturnType<typeof spawn>,
   logger?: RuntimeDebugLogger,
+  stderrChunks: string[] = [],
 ): void {
   child.once("spawn", () => {
     logger?.log("runtime", "runtime child spawned", {
@@ -541,10 +566,240 @@ function registerChildDebugLogging(
 
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk) => {
+    stderrChunks.push(String(chunk));
+    while (stderrChunks.length > 6) {
+      stderrChunks.shift();
+    }
     logger?.log("runtime", "runtime child stderr", {
       chunk: String(chunk),
     });
   });
+}
+
+type AcpPacketDirection = "sent" | "received";
+
+function createAcpPacketLoggingTransform(direction: AcpPacketDirection, logger?: RuntimeDebugLogger): Transform {
+  let pending = "";
+
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding as BufferEncoding);
+      if (logger) {
+        pending += buffer.toString("utf8");
+        let newlineIndex = pending.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = pending.slice(0, newlineIndex).trim();
+          pending = pending.slice(newlineIndex + 1);
+          logAcpPacketLine(logger, direction, line);
+          newlineIndex = pending.indexOf("\n");
+        }
+      }
+      callback(null, buffer);
+    },
+    flush(callback) {
+      if (logger && pending.trim()) {
+        logAcpPacketLine(logger, direction, pending.trim());
+      }
+      callback();
+    },
+  });
+}
+
+function logAcpPacketLine(logger: RuntimeDebugLogger, direction: AcpPacketDirection, line: string): void {
+  if (!line) {
+    return;
+  }
+
+  try {
+    logger.log("runtime", `runtime acp packet ${direction}`, {
+      direction,
+      packet: sanitizeAcpLogValue(JSON.parse(line)),
+    });
+  } catch {
+    logger.log("runtime", `runtime acp packet ${direction}`, {
+      direction,
+      rawLine: truncateLogString(line),
+      parseError: "Invalid JSON line",
+    });
+  }
+}
+
+const MAX_ACP_LOG_STRING_LENGTH = 2_000;
+const MAX_ACP_LOG_ARRAY_LENGTH = 40;
+const MAX_ACP_LOG_DEPTH = 8;
+
+function sanitizeAcpLogValue(value: unknown, parentKey?: string, depth = 0): unknown {
+  if (parentKey && shouldRedactAcpLogKey(parentKey)) {
+    return redactAcpLogValue(value);
+  }
+  if (depth > MAX_ACP_LOG_DEPTH) {
+    return "[MaxDepth]";
+  }
+  if (typeof value === "string") {
+    return truncateLogString(value);
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .slice(0, MAX_ACP_LOG_ARRAY_LENGTH)
+      .map((entry) => sanitizeAcpLogValue(entry, parentKey, depth + 1));
+    if (value.length > MAX_ACP_LOG_ARRAY_LENGTH) {
+      sanitized.push(`[${value.length - MAX_ACP_LOG_ARRAY_LENGTH} more items]`);
+    }
+    return sanitized;
+  }
+
+  const output: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    output[key] = sanitizeAcpLogValue(entry, key, depth + 1);
+  }
+  return output;
+}
+
+function redactAcpLogValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(() => "[REDACTED]");
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.keys(value).map((key) => [key, "[REDACTED]"]));
+  }
+  return "[REDACTED]";
+}
+
+function shouldRedactAcpLogKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "authorization"
+    || normalized === "cookie"
+    || normalized === "set-cookie"
+    || normalized === "env"
+    || normalized.includes("api_key")
+    || normalized.includes("apikey")
+    || normalized.includes("access_token")
+    || normalized.includes("refresh_token")
+    || normalized.includes("secret")
+    || normalized.includes("password")
+    || normalized.includes("credential")
+    || normalized.endsWith("token");
+}
+
+function truncateLogString(value: string): string {
+  if (value.length <= MAX_ACP_LOG_STRING_LENGTH) {
+    return value;
+  }
+  return `${value.slice(0, MAX_ACP_LOG_STRING_LENGTH)}...[truncated ${value.length - MAX_ACP_LOG_STRING_LENGTH} chars]`;
+}
+
+function enrichRuntimeError(error: unknown, stderrChunks: string[]): unknown {
+  if (error instanceof RuntimeAuthenticationRequiredError) {
+    return error;
+  }
+
+  const originalMessage = error instanceof Error ? error.message : String(error);
+  const acpDetails = extractAcpErrorDetails(error);
+  let message = acpDetails && isGenericAcpErrorMessage(originalMessage)
+    ? acpDetails
+    : originalMessage;
+  if (acpDetails && !message.includes(acpDetails)) {
+    message = `${message}\n\n${acpDetails}`;
+  }
+  message = message.replace(/qodercli \/login/g, "qodercli login");
+  const stderrHint = extractRuntimeStderrHint(stderrChunks);
+  if (stderrHint && !message.includes(stderrHint)) {
+    message = `${message}\n\n${stderrHint}`;
+  }
+
+  if (message === originalMessage) {
+    return error;
+  }
+
+  const enriched = new Error(message);
+  enriched.name = error instanceof Error ? error.name : "Error";
+  enriched.cause = error;
+  return enriched;
+}
+
+function extractAcpErrorDetails(error: unknown): string | null {
+  if (!(error instanceof acp.RequestError)) {
+    return null;
+  }
+
+  const data = error.data;
+  if (typeof data === "string") {
+    return data;
+  }
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const details = (data as { details?: unknown }).details;
+  if (typeof details === "string" && details.trim().length > 0) {
+    return details.trim();
+  }
+
+  const message = (data as { message?: unknown }).message;
+  if (typeof message === "string" && message.trim().length > 0) {
+    return message.trim();
+  }
+
+  return null;
+}
+
+function isGenericAcpErrorMessage(message: string): boolean {
+  return message === "Internal error" || message === "Invalid params" || message === "Invalid request";
+}
+
+function extractRuntimeStderrHint(stderrChunks: string[]): string | null {
+  const stderr = stderrChunks.join("").trim();
+  if (!stderr) {
+    return null;
+  }
+
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const actionableLines = lines.filter((line) =>
+    line.includes("GH_COPILOT_TOKEN")
+    || line.includes("GITHUB_COPILOT_TOKEN")
+    || line.includes("minimum required version")
+    || line.includes("npm install -g @github/copilot")
+    || line.includes("qodercli /login")
+    || line.includes("qodercli login")
+    || line.includes("could not open a new TTY")
+    || line.includes("device not configured")
+  );
+  if (actionableLines.length === 0) {
+    return null;
+  }
+
+  return actionableLines.slice(-4).join("\n").replace(/qodercli \/login/g, "qodercli login");
+}
+
+function terminateRuntimeProcess(
+  child: ReturnType<typeof spawn>,
+  logger?: RuntimeDebugLogger,
+): void {
+  if (child.killed) {
+    return;
+  }
+
+  const pid = child.pid;
+  try {
+    if (pid && process.platform !== "win32") {
+      process.kill(-pid, "SIGTERM");
+      logger?.log("runtime", "runtime process group terminated", {
+        pid,
+        signal: "SIGTERM",
+      });
+      return;
+    }
+  } catch (error) {
+    logger?.log("runtime", "runtime process group termination failed", error);
+  }
+
+  child.kill();
 }
 
 async function createNewSession(
@@ -650,6 +905,39 @@ async function runWithAuthentication<T extends AcpSessionResponse>(
   input: RuntimeSessionCreateInput,
   label: string,
 ): Promise<T> {
+  if (input.authenticationMethodId && input.allowAuthentication !== false) {
+    try {
+      const initializedSession = await operation();
+      if (input.authenticationHandledByLaunch) {
+        input.logger?.log("runtime", "runtime authentication handled by launch configuration", {
+          label,
+          methodId: input.authenticationMethodId,
+          sessionId: initializedSession.sessionId,
+        });
+        return initializedSession;
+      }
+
+      if (sessionHasAvailableModels(initializedSession)) {
+        return initializedSession;
+      }
+
+      input.logger?.log("runtime", "runtime authentication deferred until after session initialization", {
+        label,
+        methodId: input.authenticationMethodId,
+        sessionId: initializedSession.sessionId,
+      });
+      await authenticateWithSelectedMethod(connection, authMethods, input, label, input.authenticationMethodId);
+      return operation();
+    } catch (error) {
+      if (!isAuthenticationRequired(error)) {
+        throw error;
+      }
+
+      await authenticateWithSelectedMethod(connection, authMethods, input, label, input.authenticationMethodId);
+      return operation();
+    }
+  }
+
   try {
     return await operation();
   } catch (error) {
@@ -666,23 +954,42 @@ async function runWithAuthentication<T extends AcpSessionResponse>(
       input.logger?.log("runtime", "runtime authentication skipped", {
         label,
       });
-      throw error;
+      throw new RuntimeAuthenticationRequiredError(normalizeAuthMethods(authMethods), error);
     }
 
-    input.logger?.log("runtime", "runtime authentication requested", {
-      label,
-      methodId: method.id,
-      methodName: "name" in method ? method.name : undefined,
-    });
-    await connection.authenticate({
-      methodId: method.id,
-    });
-    input.logger?.log("runtime", "runtime authentication completed", {
-      label,
-      methodId: method.id,
-    });
+    await authenticateWithSelectedMethod(connection, authMethods, input, label, method.id);
     return operation();
   }
+}
+
+function sessionHasAvailableModels(session: AcpSessionResponse): boolean {
+  return (normalizeModelState(session.models)?.availableModels.length ?? 0) > 0;
+}
+
+async function authenticateWithSelectedMethod(
+  connection: acp.ClientSideConnection,
+  authMethods: AcpAuthMethod[] | undefined,
+  input: RuntimeSessionCreateInput,
+  label: string,
+  methodId: string,
+): Promise<void> {
+  const selectedMethod = authMethods?.find((entry) => entry.id === methodId);
+  if (!selectedMethod) {
+    throw new Error(`Authentication method ${methodId} is not available`);
+  }
+
+  input.logger?.log("runtime", "runtime authentication requested", {
+    label,
+    methodId: selectedMethod.id,
+    methodName: "name" in selectedMethod ? selectedMethod.name : undefined,
+  });
+  await connection.authenticate({
+    methodId: selectedMethod.id,
+  });
+  input.logger?.log("runtime", "runtime authentication completed", {
+    label,
+    methodId: selectedMethod.id,
+  });
 }
 
 function isAuthenticationRequired(error: unknown): boolean {
@@ -764,6 +1071,91 @@ function normalizeModelState(value: unknown): ModelState | null {
     currentModelId: candidate.currentModelId,
     availableModels,
   };
+}
+
+function normalizeAuthMethods(authMethods: AcpAuthMethod[] | undefined): AuthMethodSummary[] {
+  return (authMethods ?? []).map((method) => {
+    const explicitType = "type" in method && (method.type === "env_var" || method.type === "terminal")
+      ? method.type
+      : null;
+    const envVars = Array.isArray((method as { vars?: unknown }).vars)
+      ? normalizeAuthEnvVars((method as { vars?: unknown[] }).vars)
+      : [];
+    const description = "description" in method && typeof method.description === "string"
+      ? method.description
+      : null;
+    const inferredEnvVars = explicitType ? [] : inferAuthEnvVarsFromMethod(method);
+    const type = explicitType ?? (envVars.length > 0 || inferredEnvVars.length > 0 ? "env_var" : "agent");
+    const summary: AuthMethodSummary = {
+      id: method.id,
+      type,
+      name: "name" in method && typeof method.name === "string" ? method.name : null,
+      description,
+    };
+
+    if (type === "env_var") {
+      summary.vars = envVars.length > 0 ? envVars : inferredEnvVars;
+      summary.link = "link" in method && typeof method.link === "string" ? method.link : null;
+    }
+
+    if (type === "terminal") {
+      if ("args" in method && Array.isArray(method.args)) {
+        summary.args = (method.args as unknown[]).filter((arg): arg is string => typeof arg === "string");
+      }
+      if ("env" in method && method.env && typeof method.env === "object") {
+        summary.env = Object.fromEntries(
+          Object.entries(method.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+        );
+      }
+    }
+
+    return summary;
+  });
+}
+
+function inferAuthEnvVarsFromMethod(method: AcpAuthMethod): AuthEnvVarSummary[] {
+  const text = [
+    method.id,
+    "name" in method && typeof method.name === "string" ? method.name : null,
+    "description" in method && typeof method.description === "string" ? method.description : null,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n");
+  const names = new Set<string>();
+  const envVarPattern = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
+
+  for (const match of text.matchAll(envVarPattern)) {
+    names.add(match[0]);
+  }
+
+  return Array.from(names).map((name) => ({
+    name,
+    label: null,
+    optional: false,
+    secret: true,
+  }));
+}
+
+function normalizeAuthEnvVars(vars: unknown[] | undefined): AuthEnvVarSummary[] {
+  return (vars ?? [])
+    .map((variable): AuthEnvVarSummary | null => {
+      const candidate = variable as {
+        name?: unknown;
+        label?: unknown;
+        optional?: unknown;
+        secret?: unknown;
+      };
+      if (!candidate || typeof candidate !== "object" || typeof candidate.name !== "string") {
+        return null;
+      }
+      return {
+        name: candidate.name,
+        label: typeof candidate.label === "string" ? candidate.label : null,
+        optional: candidate.optional === true,
+        secret: candidate.secret !== false,
+      };
+    })
+    .filter((variable): variable is AuthEnvVarSummary => variable !== null);
 }
 
 function buildSessionRequest(input: RuntimeSessionCreateInput): NewSessionRequest {

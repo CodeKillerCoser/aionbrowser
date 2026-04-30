@@ -4,7 +4,8 @@ import { Readable, Writable } from "node:stream";
 class MockAuthModelAgent {
   constructor(connection) {
     this.connection = connection;
-    this.authenticated = false;
+    this.authenticated = Boolean(process.env.MOCK_AGENT_API_KEY);
+    this.emptyModels = process.env.MOCK_AGENT_EMPTY_MODELS === "1";
     this.currentModelId = "fast";
   }
 
@@ -19,6 +20,20 @@ class MockAuthModelAgent {
           id: "browser",
           name: "Browser login",
           description: "Open the agent login flow",
+        },
+        {
+          type: "env_var",
+          id: "api-key",
+          name: "Use API key",
+          description: "Set an API key in the agent environment.",
+          link: "https://example.com/api-key",
+          vars: [
+            {
+              name: "MOCK_AGENT_API_KEY",
+              label: "Mock API key",
+              secret: true,
+            },
+          ],
         },
       ],
     };
@@ -36,6 +51,12 @@ class MockAuthModelAgent {
   }
 
   async authenticate(params) {
+    if (process.env.MOCK_AGENT_AUTH_ERROR_DETAILS) {
+      throw acp.RequestError.internalError({
+        details: process.env.MOCK_AGENT_AUTH_ERROR_DETAILS,
+      });
+    }
+
     if (params.methodId !== "browser") {
       throw new Error(`Unexpected auth method: ${params.methodId}`);
     }
@@ -64,6 +85,13 @@ class MockAuthModelAgent {
   async cancel() {}
 
   modelState() {
+    if (this.emptyModels) {
+      return {
+        currentModelId: "",
+        availableModels: [],
+      };
+    }
+
     return {
       currentModelId: this.currentModelId,
       availableModels: [

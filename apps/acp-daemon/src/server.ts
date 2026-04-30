@@ -80,11 +80,47 @@ export function createDaemonApp(options: CreateDaemonAppOptions) {
         return;
       }
 
+      const agentAuthMatch = url.pathname.match(/^\/agents\/([^/]+)\/auth$/);
+      if (agentAuthMatch && method === "GET") {
+        const agentId = decodeURIComponent(agentAuthMatch[1]);
+        const agent = await resolveListedAgent(options.listAgents, agentId);
+
+        if (!agent) {
+          writeJson(response, 404, { error: `Agent ${agentId} not found` });
+          return;
+        }
+
+        writeJson(response, 200, await sessions.getAgentAuthStatus(agent));
+        return;
+      }
+
+      const agentAuthenticateMatch = url.pathname.match(/^\/agents\/([^/]+)\/authenticate$/);
+      if (agentAuthenticateMatch && method === "POST") {
+        const agentId = decodeURIComponent(agentAuthenticateMatch[1]);
+        const agent = await resolveListedAgent(options.listAgents, agentId);
+
+        if (!agent) {
+          writeJson(response, 404, { error: `Agent ${agentId} not found` });
+          return;
+        }
+
+        const body = await readJsonBody(request) as { methodId?: unknown; env?: unknown };
+        writeJson(
+          response,
+          200,
+          await sessions.authenticateAgent(
+            agent,
+            typeof body.methodId === "string" && body.methodId.length > 0 ? body.methodId : undefined,
+            readStringRecord(body.env),
+          ),
+        );
+        return;
+      }
+
       const agentModelMatch = url.pathname.match(/^\/agents\/([^/]+)\/model$/);
       if (agentModelMatch && method === "GET") {
         const agentId = decodeURIComponent(agentModelMatch[1]);
-        const agents = await options.listAgents();
-        const agent = agents.find((entry) => entry.id === agentId);
+        const agent = await resolveListedAgent(options.listAgents, agentId);
 
         if (!agent) {
           writeJson(response, 404, { error: `Agent ${agentId} not found` });
@@ -359,6 +395,14 @@ function isAuthorized(headerValue: string | undefined, token: string): boolean {
   return headerValue === `Bearer ${token}`;
 }
 
+async function resolveListedAgent(
+  listAgents: () => Promise<ResolvedAgent[]>,
+  agentId: string,
+): Promise<ResolvedAgent | null> {
+  const agents = await listAgents();
+  return agents.find((entry) => entry.id === agentId) ?? null;
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
 
@@ -371,6 +415,20 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
   }
 
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+}
+
+function readStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const entries = Object.entries(value)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries);
 }
 
 function writeJson(

@@ -7,6 +7,7 @@ import {
 import type {
   AgentSpec,
   AgentSpecCandidate,
+  AgentAuthStatus,
   BrowserContextBundle,
   BrowserContextTimelineEntry,
   BrowserTabPreview,
@@ -159,6 +160,23 @@ const backgroundRouter = createBackgroundRouter({
   getAgentModels: async (agentId) => {
     const bootstrap = await ensureDaemon();
     return fetchDaemonJson<ModelState | null>(bootstrap, `/agents/${encodeURIComponent(agentId)}/model`);
+  },
+  getAgentAuthStatus: async (agentId) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentAuthStatus>(bootstrap, `/agents/${encodeURIComponent(agentId)}/auth`);
+  },
+  authenticateAgent: async (agentId, methodId, env) => {
+    const bootstrap = await ensureDaemon();
+    return fetchDaemonJson<AgentAuthStatus>(bootstrap, `/agents/${encodeURIComponent(agentId)}/authenticate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        methodId,
+        env,
+      }),
+    });
   },
   getSessionModels: async (sessionId) => {
     const bootstrap = await ensureDaemon();
@@ -525,10 +543,24 @@ async function fetchDaemonJson<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`Daemon request failed: ${response.status}`);
+    throw new Error(parseDaemonErrorMessage(rawBody) ?? `Daemon request failed: ${response.status}`);
   }
 
   return JSON.parse(rawBody) as T;
+}
+
+function parseDaemonErrorMessage(rawBody: string): string | null {
+  const trimmed = rawBody.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: unknown };
+    return typeof parsed.error === "string" && parsed.error.length > 0 ? parsed.error : null;
+  } catch {
+    return trimmed;
+  }
 }
 
 function sendNativeMessage(message: { command: "ensureDaemon" | "getDaemonStatus" | "openLogs" }): Promise<NativeHostBootstrapResponse> {

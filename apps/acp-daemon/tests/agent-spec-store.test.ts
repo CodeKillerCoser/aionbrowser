@@ -137,7 +137,7 @@ describe("AgentSpecStore and AgentRegistry", () => {
     expect(() => JSON.parse(readFileSync(configPath, "utf8"))).not.toThrow();
   });
 
-  it("migrates the obsolete GitHub Copilot npx ACP launch command", async () => {
+  it("migrates obsolete GitHub Copilot ACP launch commands", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-agent-specs-"));
     tempDirs.push(rootDir);
     const configPath = join(rootDir, "agent-specs.json");
@@ -158,6 +158,66 @@ describe("AgentSpecStore and AgentRegistry", () => {
           createdAt: "2026-04-20T00:00:00.000Z",
           updatedAt: "2026-04-20T00:00:00.000Z",
         },
+        {
+          id: "external-local-github-copilot",
+          name: "GitHub Copilot Local",
+          kind: "external-acp",
+          enabled: true,
+          launch: {
+            command: "copilot",
+            args: ["--acp", "--stdio"],
+          },
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+        },
+      ], null, 2),
+      "utf8",
+    );
+
+    const specs = await store.list();
+
+    expect(specs).toHaveLength(2);
+    for (const spec of specs) {
+      expect(spec).toMatchObject({
+        launch: {
+          command: "npx",
+          args: ["@github/copilot-language-server", "--acp", "--stdio"],
+        },
+      });
+    }
+    expect(JSON.parse(readFileSync(configPath, "utf8")).map((entry: { launch: unknown }) => entry.launch)).toEqual([
+      {
+        command: "npx",
+        args: ["@github/copilot-language-server", "--acp", "--stdio"],
+      },
+      {
+        command: "npx",
+        args: ["@github/copilot-language-server", "--acp", "--stdio"],
+      },
+    ]);
+  });
+
+  it("does not migrate unrelated copilot custom commands", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-agent-specs-"));
+    tempDirs.push(rootDir);
+    const configPath = join(rootDir, "agent-specs.json");
+    const store = new AgentSpecStore(rootDir);
+
+    writeFileSync(
+      configPath,
+      JSON.stringify([
+        {
+          id: "external-custom-copilot",
+          name: "Custom Copilot",
+          kind: "external-acp",
+          enabled: true,
+          launch: {
+            command: "copilot",
+            args: ["--model", "gpt-5"],
+          },
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+        },
       ], null, 2),
       "utf8",
     );
@@ -167,12 +227,8 @@ describe("AgentSpecStore and AgentRegistry", () => {
     expect(specs[0]).toMatchObject({
       launch: {
         command: "copilot",
-        args: ["--acp", "--stdio"],
+        args: ["--model", "gpt-5"],
       },
-    });
-    expect(JSON.parse(readFileSync(configPath, "utf8"))[0].launch).toEqual({
-      command: "copilot",
-      args: ["--acp", "--stdio"],
     });
   });
 });

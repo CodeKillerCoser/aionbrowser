@@ -215,6 +215,178 @@ describe("SessionManager runtime lifecycle", () => {
     expect(runtime.dispose).toHaveBeenCalledOnce();
   });
 
+  it("uses a longer default timeout for cold agent model probes", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "github-copilot",
+      name: "GitHub Copilot",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "npx",
+      },
+      status: "ready",
+      launchCommand: "npx",
+      launchArgs: ["@github/copilot-language-server", "--acp", "--stdio"],
+    };
+    const models: ModelState = {
+      currentModelId: "gpt-5",
+      availableModels: [
+        {
+          modelId: "gpt-5",
+          name: "GPT-5",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "model-probe-session",
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const createRuntime = vi.fn().mockResolvedValue(runtime);
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      createRuntime,
+    });
+
+    await expect(manager.getAgentModels(agent)).resolves.toEqual(models);
+
+    expect(createRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowAuthentication: false,
+        startupTimeoutMs: 30000,
+      }),
+    );
+  });
+
+  it("uses a longer timeout for interactive agent authentication", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "github-copilot",
+      name: "GitHub Copilot",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "copilot",
+      },
+      status: "ready",
+      launchCommand: "copilot",
+      launchArgs: ["--acp"],
+    };
+    const models: ModelState = {
+      currentModelId: "gpt-5",
+      availableModels: [
+        {
+          modelId: "gpt-5",
+          name: "GPT-5",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "auth-session",
+      getAuthMethods: vi.fn().mockReturnValue([]),
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const createRuntime = vi.fn().mockResolvedValue(runtime);
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      modelProbeTimeoutMs: 1234,
+      agentAuthenticationTimeoutMs: 5678,
+      createRuntime,
+    });
+
+    await expect(manager.authenticateAgent(agent, "github_oauth")).resolves.toMatchObject({
+      state: "authenticated",
+      models,
+    });
+
+    expect(createRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowAuthentication: true,
+        authenticationMethodId: "github_oauth",
+        startupTimeoutMs: 5678,
+      }),
+    );
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("allows slow browser OAuth flows by default", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
+    tempDirs.push(rootDir);
+
+    const store = new SessionStore(rootDir);
+    const agent: ResolvedAgent = {
+      id: "gemini-cli",
+      name: "Gemini CLI",
+      source: "user",
+      distribution: {
+        type: "custom",
+        command: "gemini",
+      },
+      status: "ready",
+      launchCommand: "gemini",
+      launchArgs: ["--experimental-acp"],
+    };
+    const models: ModelState = {
+      currentModelId: "gemini",
+      availableModels: [
+        {
+          modelId: "gemini",
+          name: "Gemini",
+        },
+      ],
+    };
+    const runtime = {
+      sessionId: "oauth-auth-session",
+      getAuthMethods: vi.fn().mockReturnValue([]),
+      getModelState: vi.fn().mockReturnValue(models),
+      setModel: vi.fn().mockResolvedValue(models),
+      prompt: vi.fn().mockResolvedValue({ stopReason: "end_turn" }),
+      resolvePermission: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const createRuntime = vi.fn().mockResolvedValue(runtime);
+
+    const manager = new SessionManager({
+      store,
+      defaultCwd: rootDir,
+      createRuntime,
+    });
+
+    await expect(manager.authenticateAgent(agent, "oauth-personal")).resolves.toMatchObject({
+      state: "authenticated",
+      models,
+    });
+
+    expect(createRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowAuthentication: true,
+        authenticationMethodId: "oauth-personal",
+        startupTimeoutMs: 10 * 60 * 1000,
+      }),
+    );
+  });
+
   it("shares an in-flight agent model probe for concurrent requests", async () => {
     const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-runtime-"));
     tempDirs.push(rootDir);

@@ -168,6 +168,41 @@ export interface ModelState {
   availableModels: ModelInfo[];
 }
 
+export type AuthMethodType = "agent" | "env_var" | "terminal";
+
+export interface AuthEnvVarSummary {
+  name: string;
+  label?: string | null;
+  optional?: boolean;
+  secret?: boolean;
+}
+
+export interface AuthMethodSummary {
+  id: string;
+  type: AuthMethodType;
+  name?: string | null;
+  description?: string | null;
+  link?: string | null;
+  vars?: AuthEnvVarSummary[];
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export type AgentAuthState =
+  | "authenticated"
+  | "unauthenticated"
+  | "not_required"
+  | "unavailable"
+  | "unknown";
+
+export interface AgentAuthStatus {
+  state: AgentAuthState;
+  methods: AuthMethodSummary[];
+  checkedAt: string;
+  error?: string | null;
+  models?: ModelState | null;
+}
+
 export interface ConversationSummary {
   id: string;
   agentId: string;

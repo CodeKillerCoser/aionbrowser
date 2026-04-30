@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureDaemonRunning } from "../src/daemonBootstrap.js";
+import { buildDaemonEntryFingerprint, ensureDaemonRunning } from "../src/daemonBootstrap.js";
 import { buildDaemonEnvironment } from "../src/daemonBootstrap.js";
 import { loadLoginShellEnvironment } from "../src/daemonBootstrap.js";
 
@@ -115,6 +115,31 @@ describe("ensureDaemonRunning", () => {
     });
     expect(healthCheck).toHaveBeenCalledTimes(3);
     expect(readFileSync(join(rootDir, "daemon.log"), "utf8")).toContain("\"message\":\"daemon state persisted\"");
+  });
+});
+
+describe("buildDaemonEntryFingerprint", () => {
+  it("changes when a runtime dependency file changes", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "browser-acp-native-host-fingerprint-"));
+    tempDirs.push(rootDir);
+    const daemonEntry = join(rootDir, "daemon.js");
+    const runtimeDependency = join(rootDir, "runtimeSession.js");
+    writeFileSync(daemonEntry, "console.log('daemon');", "utf8");
+    writeFileSync(runtimeDependency, "export const value = 1;", "utf8");
+
+    const first = await buildDaemonEntryFingerprint(
+      { command: process.execPath, args: [daemonEntry] },
+      [daemonEntry, runtimeDependency],
+    );
+
+    writeFileSync(runtimeDependency, "export const value = 1000;", "utf8");
+
+    const second = await buildDaemonEntryFingerprint(
+      { command: process.execPath, args: [daemonEntry] },
+      [daemonEntry, runtimeDependency],
+    );
+
+    expect(second).not.toBe(first);
   });
 });
 

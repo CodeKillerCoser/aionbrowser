@@ -1,4 +1,5 @@
 import type {
+  AgentAuthStatus,
   ConversationSummary,
   ModelState,
   PermissionDecision,
@@ -7,6 +8,7 @@ import type {
   SessionEvent,
 } from "@browser-acp/shared-types";
 import { LRUCache } from "lru-cache";
+import { RuntimeAuthenticationRequiredError } from "./runtime.js";
 import type {
   RuntimeDebugLogger,
   RuntimeHost,
@@ -37,12 +39,35 @@ export interface SessionManagerOptions {
   runtimeHost?: RuntimeHost;
   maxActiveRuntimes?: number;
   modelProbeTimeoutMs?: number;
+  agentAuthenticationTimeoutMs?: number;
   createTurnId?: () => string;
 }
 
 type Subscriber = (event: SessionEvent) => void;
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const MODEL_PROBE_TIMEOUT_MS = 15 * 1000;
+const MODEL_PROBE_TIMEOUT_MS = 30 * 1000;
+const AGENT_AUTHENTICATION_TIMEOUT_MS = 10 * 60 * 1000;
+const EMPTY_MODEL_AUTH_ERROR = "API key 登录没有返回可用模型，请检查凭证后重试。";
+
+function sanitizeCredentialEnv(env: Record<string, string> | undefined): Record<string, string> | null {
+  if (!env) {
+    return null;
+  }
+
+  const entries = Object.entries(env)
+    .map(([key, value]) => [key.trim(), value] as const)
+    .filter(([key, value]) => key.length > 0 && value.length > 0);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return Object.fromEntries(entries);
+}
+
+function hasAvailableModels(models: ModelState | null | undefined): models is ModelState {
+  return Boolean(models?.availableModels.length);
+}
 
 export class SessionManager {
   private readonly subscribers = new Map<string, Set<Subscriber>>();
@@ -55,6 +80,14 @@ export class SessionManager {
     ttl: MODEL_CACHE_TTL_MS,
   });
   private readonly agentModelCache = new LRUCache<string, ModelState>({
+    max: 100,
+    ttl: MODEL_CACHE_TTL_MS,
+  });
+  private readonly agentAuthCache = new LRUCache<string, AgentAuthStatus>({
+    max: 100,
+    ttl: 60 * 1000,
+  });
+  private readonly agentCredentialEnvCache = new LRUCache<string, Record<string, string>>({
     max: 100,
     ttl: MODEL_CACHE_TTL_MS,
   });
@@ -72,7 +105,9 @@ export class SessionManager {
       launchArgs: input.agent.launchArgs,
     });
     await this.evictRuntimeIfNeeded();
-    const runtime = await this.createRuntime(input.agent);
+    const runtime = await this.createRuntime(input.agent, undefined, undefined, {
+      env: this.getAgentCredentialEnv(input.agent.id),
+    });
 
     const now = input.context.capturedAt;
     const summary: ConversationSummary = {
@@ -345,6 +380,140 @@ export class SessionManager {
     }
   }
 
+  async getAgentAuthStatus(agent: ResolvedAgent): Promise<AgentAuthStatus> {
+    const cached = this.agentAuthCache.get(agent.id);
+    if (cached) {
+      return cached;
+    }
+
+    this.options.logger?.log("session", "agent auth status requested", {
+      agentId: agent.id,
+      agentName: agent.name,
+    });
+
+    try {
+      const timeoutMs = this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS;
+      const runtime = await this.withRuntimeStartupTimeout(
+        this.createRuntime(agent, undefined, async () => undefined, {
+          allowAuthentication: false,
+          startupTimeoutMs: timeoutMs,
+          env: this.getAgentCredentialEnv(agent.id),
+        }),
+        timeoutMs,
+        "Model probe",
+      );
+      const models = runtime.getModelState();
+      const methods = runtime.getAuthMethods?.() ?? [];
+      if (!hasAvailableModels(models)) {
+        this.cacheAgentModels(agent.id, null);
+        const status = this.cacheAgentAuthStatus(agent.id, {
+          state: methods.length > 0 ? "unauthenticated" : "unavailable",
+          methods,
+          checkedAt: new Date().toISOString(),
+          error: "当前 Agent 没有返回可切换的模型列表。",
+          models,
+        });
+        void this.disposeProbeRuntime(agent, runtime);
+        return status;
+      }
+
+      this.cacheAgentModels(agent.id, models);
+      const status = this.cacheAgentAuthStatus(agent.id, {
+        state: methods.length > 0 ? "authenticated" : "not_required",
+        methods,
+        checkedAt: new Date().toISOString(),
+        models,
+      });
+      void this.disposeProbeRuntime(agent, runtime);
+      return status;
+    } catch (error) {
+      const status = this.authStatusFromError(agent.id, error);
+      if (status) {
+        return status;
+      }
+
+      const unavailable = this.cacheAgentAuthStatus(agent.id, {
+        state: "unavailable",
+        methods: [],
+        checkedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return unavailable;
+    }
+  }
+
+  async authenticateAgent(
+    agent: ResolvedAgent,
+    methodId?: string,
+    env?: Record<string, string>,
+  ): Promise<AgentAuthStatus> {
+    this.options.logger?.log("session", "agent authentication requested", {
+      agentId: agent.id,
+      agentName: agent.name,
+      methodId,
+    });
+
+    try {
+      const credentialEnv = sanitizeCredentialEnv(env);
+      this.options.logger?.log("session", "agent authentication credential env prepared", {
+        agentId: agent.id,
+        methodId,
+        envKeys: credentialEnv ? Object.keys(credentialEnv) : [],
+      });
+      const timeoutMs = this.options.agentAuthenticationTimeoutMs ?? AGENT_AUTHENTICATION_TIMEOUT_MS;
+      const runtime = await this.withRuntimeStartupTimeout(
+        this.createRuntime(agent, undefined, async () => undefined, {
+          allowAuthentication: credentialEnv ? false : true,
+          authenticationMethodId: methodId,
+          startupTimeoutMs: timeoutMs,
+          env: credentialEnv ?? this.getAgentCredentialEnv(agent.id),
+        }),
+        timeoutMs,
+        "Agent authentication",
+      );
+      const models = runtime.getModelState();
+      const methods = runtime.getAuthMethods?.() ?? [];
+      if (credentialEnv && !hasAvailableModels(models)) {
+        this.agentCredentialEnvCache.delete(agent.id);
+        this.cacheAgentModels(agent.id, null);
+        const status = this.cacheAgentAuthStatus(agent.id, {
+          state: "unauthenticated",
+          methods,
+          checkedAt: new Date().toISOString(),
+          error: EMPTY_MODEL_AUTH_ERROR,
+          models,
+        });
+        void this.disposeProbeRuntime(agent, runtime);
+        return status;
+      }
+
+      if (credentialEnv) {
+        this.agentCredentialEnvCache.set(agent.id, credentialEnv);
+      }
+      this.cacheAgentModels(agent.id, models);
+      const status = this.cacheAgentAuthStatus(agent.id, {
+        state: "authenticated",
+        methods,
+        checkedAt: new Date().toISOString(),
+        models,
+      });
+      void this.disposeProbeRuntime(agent, runtime);
+      return status;
+    } catch (error) {
+      const status = this.authStatusFromError(agent.id, error);
+      if (status) {
+        return status;
+      }
+
+      return this.cacheAgentAuthStatus(agent.id, {
+        state: "unavailable",
+        methods: [],
+        checkedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async setModel(sessionId: string, modelId: string): Promise<ModelState | null> {
     const summary = await this.getSummary(sessionId);
     if (!summary) {
@@ -445,7 +614,7 @@ export class SessionManager {
     onEvent: RuntimeSessionCreateInput["onEvent"] = async (event) => {
       await this.recordEvent(event);
     },
-    overrides: Pick<RuntimeSessionCreateInput, "allowAuthentication" | "startupTimeoutMs"> = {},
+    overrides: Pick<RuntimeSessionCreateInput, "allowAuthentication" | "authenticationMethodId" | "authenticationHandledByLaunch" | "startupTimeoutMs" | "env"> = {},
   ): Promise<RuntimeSessionLike> {
     const runtimeInput: RuntimeSessionCreateInput = {
       cwd: this.options.defaultCwd,
@@ -473,20 +642,23 @@ export class SessionManager {
       runtime: {
         onEvent: runtimeInput.onEvent,
         logger: runtimeInput.logger,
+        env: runtimeInput.env,
         allowAuthentication: runtimeInput.allowAuthentication,
+        authenticationMethodId: runtimeInput.authenticationMethodId,
+        authenticationHandledByLaunch: runtimeInput.authenticationHandledByLaunch,
         startupTimeoutMs: runtimeInput.startupTimeoutMs,
       },
     });
   }
 
-  private withModelProbeTimeout(
+  private withRuntimeStartupTimeout(
     runtimePromise: Promise<RuntimeSessionLike>,
+    timeoutMs: number,
+    label: string,
   ): Promise<RuntimeSessionLike> {
-    const timeoutMs = this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS;
-
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Model probe timed out after ${timeoutMs}ms`));
+        reject(new Error(`${label} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       runtimePromise.then(
@@ -512,7 +684,7 @@ export class SessionManager {
   }
 
   private cacheModels(sessionId: string, models: ModelState | null): void {
-    if (!models) {
+    if (!hasAvailableModels(models)) {
       this.modelCache.delete(sessionId);
       return;
     }
@@ -521,7 +693,7 @@ export class SessionManager {
   }
 
   private cacheAgentModels(agentId: string, models: ModelState | null): void {
-    if (!models) {
+    if (!hasAvailableModels(models)) {
       this.agentModelCache.delete(agentId);
       return;
     }
@@ -529,12 +701,42 @@ export class SessionManager {
     this.agentModelCache.set(agentId, models);
   }
 
+  private cacheAgentAuthStatus(agentId: string, status: AgentAuthStatus): AgentAuthStatus {
+    this.agentAuthCache.set(agentId, status);
+    return status;
+  }
+
+  private getAgentCredentialEnv(agentId: string): Record<string, string> | undefined {
+    const env = this.agentCredentialEnvCache.get(agentId);
+    if (!env) {
+      return undefined;
+    }
+    return { ...env };
+  }
+
+  private authStatusFromError(agentId: string, error: unknown): AgentAuthStatus | null {
+    if (!(error instanceof RuntimeAuthenticationRequiredError)) {
+      return null;
+    }
+
+    return this.cacheAgentAuthStatus(agentId, {
+      state: "unauthenticated",
+      methods: error.authMethods,
+      checkedAt: new Date().toISOString(),
+      error: error.message,
+    });
+  }
+
   private async probeAgentModels(agent: ResolvedAgent): Promise<ModelState | null> {
-    const runtime = await this.withModelProbeTimeout(
+    const timeoutMs = this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS;
+    const runtime = await this.withRuntimeStartupTimeout(
       this.createRuntime(agent, undefined, async () => undefined, {
         allowAuthentication: false,
-        startupTimeoutMs: this.options.modelProbeTimeoutMs ?? MODEL_PROBE_TIMEOUT_MS,
+        startupTimeoutMs: timeoutMs,
+        env: this.getAgentCredentialEnv(agent.id),
       }),
+      timeoutMs,
+      "Model probe",
     );
     try {
       const models = runtime.getModelState();
