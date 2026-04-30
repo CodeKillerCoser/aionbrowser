@@ -1,15 +1,119 @@
 # Browser ACP
 
-A Chromium side-panel extension and local ACP bridge that turns local coding CLIs into an AI reading companion for the current web page.
+Browser ACP connects the current Chrome page to local ACP-compatible coding agents. It runs as a Chrome side-panel extension, starts a local daemon through Chrome Native Messaging, and lets agents such as Gemini CLI, Qoder CLI, Codex CLI, Claude Agent, and GitHub Copilot CLI answer questions with browser context when you ask for it.
 
-## Workspace
+The project is currently a macOS/Chrome first release.
 
-- `apps/browser-extension`: Chromium extension with side panel, background worker, and content script
-- `apps/acp-daemon`: Local ACP daemon that discovers agents, starts ACP sessions, and exposes HTTP/WS endpoints
-- `apps/native-host`: Native messaging host that bootstraps the daemon on demand
-- `packages/shared-types`: Shared protocol and domain types
+## What You Can Do
 
-## Commands
+- Ask a local agent about the current page, selected text, URL, or open browser context.
+- Keep browser context out of the user prompt body by writing dynamic page context to workspace temporary files.
+- Switch between configured ACP agents from the side panel.
+- View and switch agent models when the selected agent exposes model state.
+- Trigger agent login flows, including browser/OAuth style methods and environment-variable API key methods.
+- Configure page task templates for common selection actions.
+- Inspect daemon, panel, session, and raw ACP logs from the debug drawer.
+
+## Install From Source
+
+Prerequisites:
+
+- macOS
+- Google Chrome or another Chromium browser with compatible native messaging support
+- Node.js 20 or newer
+- pnpm 9
+
+Clone and build:
+
+```bash
+git clone https://github.com/CodeKillerCoser/aionbrowser.git
+cd aionbrowser
+pnpm install
+pnpm build
+```
+
+Load the extension:
+
+1. Open `chrome://extensions/`.
+2. Enable Developer mode.
+3. Click Load unpacked.
+4. Select `apps/browser-extension/dist`.
+5. Keep the generated extension ID handy if the native host installer cannot discover it automatically.
+
+Install the native host:
+
+```bash
+pnpm install:native-host
+```
+
+If Chrome has not written extension preferences yet, pass the extension ID explicitly:
+
+```bash
+pnpm --filter @browser-acp/native-host install:chrome-host -- --extension-id <extension-id>
+```
+
+The installer writes:
+
+- Native host launcher: `~/Library/Application Support/browser-acp/bin/com.browser_acp.host`
+- Chrome native messaging manifest: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.browser_acp.host.json`
+
+After installing the native host, reload the extension from `chrome://extensions/`, open the Browser ACP side panel, and select an agent.
+
+## Release Zip
+
+GitHub releases include `browser-acp-extension.zip`, which contains the built Chrome extension. Download it, unzip it, and load the unzipped folder with Chrome's Load unpacked flow.
+
+The native host still needs to be installed from this repository for the first release:
+
+```bash
+pnpm install
+pnpm build
+pnpm install:native-host
+```
+
+## Agent Setup
+
+Open the side panel and use Agent settings to add or enable agents. Browser ACP can discover supported ACP agents from the public ACP registry and from local commands.
+
+Common launch examples:
+
+| Agent | Example command |
+| --- | --- |
+| Gemini CLI | `npx @google/gemini-cli --experimental-acp` |
+| Qoder CLI | `npx @qoder-ai/qodercli --acp` |
+| Codex CLI | `npx @zed-industries/codex-acp` |
+| GitHub Copilot CLI | `npx @github/copilot --acp` |
+| Claude Agent | depends on the installed Claude ACP command |
+
+Agents may require their own login or API key setup. If an ACP agent returns an `env_var` auth method, Browser ACP shows a credential dialog for the required variables and optional extra key/value pairs.
+
+## Usage
+
+1. Open a web page.
+2. Open the Browser ACP side panel.
+3. Pick an agent.
+4. Ask a question in the composer, or select text on the page and run a configured page task.
+5. Use the model selector near the composer when the agent exposes switchable models.
+
+The prompt sent to the agent includes a small pointer to a workspace-local browser context file when browser context is relevant. The full tab/page context is not pasted directly into every user message.
+
+## Debugging
+
+Use the Debug toggle in the side panel to open the right-side debug drawer. It shows:
+
+- Extension background logs
+- Panel logs
+- Daemon logs
+- Current session events
+- Native host bootstrap state
+
+Useful local files:
+
+- Daemon log: `~/Library/Application Support/browser-acp/daemon.log`
+- Daemon state: `~/Library/Application Support/browser-acp/daemon-state.json`
+- Workspace temp browser context files: `<cwd>/.browser-acp/tmp/browser-contexts/`
+
+## Development
 
 ```bash
 pnpm install
@@ -18,48 +122,29 @@ pnpm typecheck
 pnpm test
 ```
 
-### Development
+Run individual pieces during development:
 
 ```bash
+pnpm dev:extension
 pnpm dev:daemon
 pnpm dev:native-host
-pnpm dev:extension
 ```
 
-## Native Host Setup
+Workspace layout:
 
-The extension expects the native messaging host name `com.browser_acp.host`.
+- `apps/browser-extension`: Chrome extension, side panel, background worker, and content script
+- `apps/acp-daemon`: Local HTTP/WebSocket daemon and session orchestration
+- `apps/native-host`: Chrome Native Messaging host and daemon bootstrapper
+- `packages/runtime-core`: Platform-neutral runtime and session contracts
+- `packages/runtime-node`: Node process launch and ACP session wiring
+- `packages/client-core`: Platform-neutral client state helpers
+- `packages/ui-react`: Shared React UI pieces
+- `packages/host-api`: Host-facing console contract
+- `packages/shared-types`: Shared protocol and domain types
+- `packages/config`: Shared runtime-safe constants
 
-Recommended on macOS:
+## Current Limitations
 
-```bash
-pnpm --filter @browser-acp/native-host build
-pnpm install:native-host
-```
-
-The installer will:
-
-- build a small executable launcher under `~/Library/Application Support/browser-acp/bin/com.browser_acp.host`
-- detect loaded `Browser ACP` extension IDs from Chrome profiles
-- write the native messaging manifest to `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.browser_acp.host.json`
-
-Manual fallback: use the template at [apps/native-host/native-host-manifest.template.json](/Users/wangxin/Developer/Work/browser_acp/apps/native-host/native-host-manifest.template.json) and replace:
-
-- `__HOST_PATH__` with the absolute path to the built native host entrypoint
-- `__EXTENSION_ID__` with the installed Chromium extension ID
-
-On macOS, the installed manifest should live under:
-
-```text
-~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.browser_acp.host.json
-```
-
-## Daemon API
-
-- `GET /health`
-- `GET /agents`
-- `GET /sessions`
-- `POST /sessions`
-- `WS /sessions/:id`
-
-All daemon HTTP requests require `Authorization: Bearer <token>`.
+- The first release is optimized for macOS and Chrome.
+- The extension is distributed as an unpacked Chrome extension zip, not a Chrome Web Store package.
+- Agent availability, login behavior, and model lists depend on each ACP CLI's current implementation.
